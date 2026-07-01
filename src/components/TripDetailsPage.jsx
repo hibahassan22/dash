@@ -593,7 +593,14 @@ export default function TripDetailsPage() {
 
       {/* Modals — props موحّدة: isOpen | onClose | onSuccess */}
       <TripNoteModal isOpen={showAddNote} onClose={() => setShowAddNote(false)} onSave={handleAddNote} />
-      <TripRefundModal isOpen={showRefund} onClose={() => setShowRefund(false)} tripId={tripId} amountPaid={paid} onSuccess={() => fetchTrip({ silent: true })} />
+      <TripRefundModal
+        isOpen={showRefund}
+        onClose={() => setShowRefund(false)}
+        tripId={tripId}
+        driverId={trip.driver?.id ?? trip.driver_id}
+        amountPaid={paid}
+        onSuccess={() => fetchTrip({ silent: true })}
+      />
       <TripChangeStatusModal
         isOpen={showStatus}
         onClose={() => setShowStatus(false)}

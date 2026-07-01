@@ -6,6 +6,7 @@ import { PERMISSIONS } from "../lib/permissions.js";
 import { useGlobalSearch } from "../hooks/useGlobalSearch";
 import { filterByGlobalSearch } from "../lib/searchUtils";
 import AppModal, { ModalField, ModalActions, modalInputClass, ConfirmModal } from "./ui/AppModal";
+import AddClientModal from "./clients/AddClientModal";
 import { bannerImage } from "../lib/images.js";
 
 const API_BASE = "https://drivo1.elmoroj.com";
@@ -19,58 +20,6 @@ const StarRating = ({ value }) => (
     {value}
   </span>
 );
-
-// ======= Add Client Modal =======
-const AddClientModal = ({ isOpen, onClose, onAddClient }) => {
-  const [formData, setFormData] = useState({ name: "", phone: "", address: "", gender: "أنثى", nationality: "سعودية" });
-  const [saving, setSaving] = useState(false);
-
-  const handleSubmit = async (e) => {
-    e.preventDefault();
-    if (!formData.name || !formData.phone) return alert("الرجاء ملء البيانات الأساسية");
-    setSaving(true);
-    try {
-      const success = await onAddClient({
-        name: formData.name,
-        phone: formData.phone,
-        address: formData.address,
-        gender: formData.gender,
-        nationality: formData.nationality,
-      });
-      if (!success) return;
-      setFormData({ name: "", phone: "", address: "", gender: "أنثى", nationality: "سعودية" });
-      onClose();
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  return (
-    <AppModal isOpen={isOpen} onClose={onClose} title="إضافة عميل جديد" isSubmitting={saving} size="lg">
-      <form onSubmit={handleSubmit} className="space-y-4">
-        <ModalField label="الاسم بالكامل" required>
-          <input type="text" required value={formData.name} onChange={(e) => setFormData({ ...formData, name: e.target.value })} className={modalInputClass} disabled={saving} />
-        </ModalField>
-        <ModalField label="رقم الهاتف" required>
-          <input type="tel" required value={formData.phone} onChange={(e) => setFormData({ ...formData, phone: e.target.value })} className={modalInputClass} dir="ltr" disabled={saving} />
-        </ModalField>
-        <ModalField label="العنوان">
-          <input type="text" value={formData.address} onChange={(e) => setFormData({ ...formData, address: e.target.value })} className={modalInputClass} disabled={saving} />
-        </ModalField>
-        <ModalField label="الجنسية">
-          <input type="text" value={formData.nationality} onChange={(e) => setFormData({ ...formData, nationality: e.target.value })} className={modalInputClass} disabled={saving} />
-        </ModalField>
-        <ModalField label="النوع">
-          <select value={formData.gender} onChange={(e) => setFormData({ ...formData, gender: e.target.value })} className={`${modalInputClass} appearance-none`} disabled={saving}>
-            <option value="أنثى">أنثى</option>
-            <option value="ذكر">ذكر</option>
-          </select>
-        </ModalField>
-        <ModalActions primaryLabel="إضافة عميل" onPrimary={() => {}} primaryType="submit" onSecondary={onClose} isSubmitting={saving} />
-      </form>
-    </AppModal>
-  );
-};
 
 // ======= Client Details Modal (عرض التفاصيل) =======
 const ClientDetailsModal = ({ isOpen, onClose, client, onUpdateClient, onAddNote }) => {
@@ -477,43 +426,22 @@ export default function ClientsPage() {
     }
   };
   
-  const handleAddClient = async (newClient) => {
-    try {
-      const response = await fetch(`${API_BASE}/api/customers`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          full_name: newClient.name,
-          phone: newClient.phone,
-          gender: newClient.gender,
-          customer_nationality: newClient.nationality || "سعودية",
-        }),
-      });
-      if (!response.ok) throw new Error(`فشل إضافة العميل: ${response.status}`);
-      const data = await response.json();
-      const created = data.data || {};
-      const clientItem = {
-        id: created.id || Date.now().toString(),
-        name: created.full_name || newClient.name,
-        phone: created.phone || newClient.phone,
-        address: newClient.address,
-        gender: created.gender || newClient.gender,
-        nationality: created.customer_nationality || newClient.nationality,
-        rating: 5.0,
-        status: "نشط",
-        trips: { total: 0, active: 0, completed: 0, cancelled: 0, paused: 0 },
-        notes: [],
-        tripHistory: [],
-      };
-      setClients((prev) => [clientItem, ...prev]);
-      toast.success("تم إضافة العميل بنجاح");
-      return true;
-    } catch (err) {
-      toast.error(err.message || "حدث خطأ أثناء إضافة العميل");
-      return false;
-    }
+  const handleAddClient = (created) => {
+    const clientItem = {
+      id: created.id,
+      name: created.name,
+      phone: created.phone,
+      address: created.address ?? "",
+      gender: created.gender,
+      nationality: created.nationality,
+      rating: 5.0,
+      status: "نشط",
+      trips: { total: 0, active: 0, completed: 0, cancelled: 0, paused: 0 },
+      notes: [],
+      tripHistory: [],
+    };
+    setClients((prev) => [clientItem, ...prev]);
+    setTotalClients((p) => p + 1);
   };
 
   const handleUpdateClient = async (updatedClient) => {
@@ -759,10 +687,10 @@ export default function ClientsPage() {
       </div>
 
       {/* المودال الخاص بإضافة العميل */}
-      <AddClientModal 
-        isOpen={isAddModalOpen} 
-        onClose={() => setIsAddModalOpen(false)} 
-        onAddClient={handleAddClient}
+      <AddClientModal
+        isOpen={isAddModalOpen}
+        onClose={() => setIsAddModalOpen(false)}
+        onSuccess={handleAddClient}
       />
 
       {/* المودال الجديد الخاص بعرض التفاصيل (تعديل وتفاصيل كاملة) */}

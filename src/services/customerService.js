@@ -37,3 +37,30 @@ export async function fetchCustomersList() {
   }
   return normalizeCustomerList(json);
 }
+
+/** POST /api/customers */
+export async function createCustomer({ name, phone, address, gender, nationality }) {
+  const res = await fetch(`${API_BASE}/customers`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Accept: "application/json" },
+    body: JSON.stringify({
+      full_name: name,
+      phone,
+      gender,
+      customer_nationality: nationality || "سعودية",
+    }),
+  });
+  const json = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    throw new Error(json?.message || json?.error || `فشل إضافة العميل (${res.status})`);
+  }
+  const created = json.data ?? json.customer ?? json;
+  return mapCustomerRecord({
+    ...created,
+    full_name: created.full_name ?? name,
+    phone: created.phone ?? phone,
+    gender: created.gender ?? gender,
+    customer_nationality: created.customer_nationality ?? nationality,
+    address: address ?? created.address,
+  });
+}

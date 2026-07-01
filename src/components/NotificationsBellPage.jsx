@@ -1,11 +1,16 @@
 import { useState, useEffect } from "react";
-import { markAllAsRead, markAsRead, isNotificationUnread } from "../services/notifications.js";
-
-const BASE = "https://drivo1.elmoroj.com/api";
+import {
+  markAllAsRead,
+  markAsRead,
+  isNotificationUnread,
+  subscribeNotifications,
+  syncBackendNotifications,
+} from "../services/notifications.js";
 
 const fmtDate = (d) => {
   if (!d) return "";
-  const date = new Date(d);
+  const date = d?.toDate ? d.toDate() : new Date(d);
+  if (Number.isNaN(date.getTime())) return "";
   const now = new Date();
   const diff = Math.floor((now - date) / 1000);
   if (diff < 60) return "منذ لحظات";
@@ -44,27 +49,37 @@ const DotsIcon = () => (
   </div>
 );
 
-export default function NotificationsPage() {
+export default function NotificationsBellPage() {
   const [notifications, setNotifications] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [filter, setFilter] = useState("all"); // all | unread | archived
+  const [filter, setFilter] = useState("all");
   const [markingAll, setMarkingAll] = useState(false);
 
-  const fetchNotifications = () => {
+  useEffect(() => {
     setLoading(true);
-    fetch(`${BASE}/drivo/admin/notifications`, {
-      headers: { "Accept": "application/json" }
-    })
-      .then(r => r.json())
-      .then(d => { setNotifications(Array.isArray(d) ? d : []); setLoading(false); })
-      .catch(() => setLoading(false));
-  };
-
-  useEffect(() => { fetchNotifications(); }, []);
+    syncBackendNotifications().finally(() => setLoading(false));
+    const unsub = subscribeNotifications((items) => {
+      setNotifications(
+        items.map((n) => ({
+          id: n.id,
+          type: n.title ?? n.type ?? "إشعار",
+          content: n.body ?? "",
+          created_at: n.apiCreatedAt ?? n.createdAt,
+          read: !isNotificationUnread(n),
+        }))
+      );
+      setLoading(false);
+    });
+    const poll = setInterval(() => syncBackendNotifications(), 30_000);
+    return () => {
+      unsub();
+      clearInterval(poll);
+    };
+  }, []);
 
   const markAllRead = async () => {
     setMarkingAll(true);
-    setNotifications((prev) => prev.map((n) => ({ ...n, status: "read" })));
+    setNotifications((prev) => prev.map((n) => ({ ...n, read: true })));
     try {
       await markAllAsRead();
     } catch (e) {
@@ -74,24 +89,24 @@ export default function NotificationsPage() {
   };
 
   const markOneRead = async (n) => {
-    if (n.status === "read") return;
+    if (n.read) return;
     setNotifications((prev) =>
-      prev.map((x) => (x.id === n.id ? { ...x, status: "read" } : x))
+      prev.map((x) => (x.id === n.id ? { ...x, read: true } : x))
     );
     try {
       await markAsRead(n.id);
     } catch {
-      /* API-only notifications may not exist in Firestore */
+      /* ignore */
     }
   };
 
   const displayed = filter === "unread"
-    ? notifications.filter(n => n.status !== "read")
+    ? notifications.filter((n) => !n.read)
     : filter === "archived"
-    ? notifications.filter(n => n.status === "read")
+    ? notifications.filter((n) => n.read)
     : notifications;
 
-  const unreadCount = notifications.filter(n => n.status !== "read").length;
+  const unreadCount = notifications.filter((n) => !n.read).length;
 
   // icon based on type
   const getIcon = (type) => {
@@ -147,7 +162,7 @@ export default function NotificationsPage() {
         <div className="space-y-3">
           {displayed.map(n => {
             const icon = getIcon(n.type);
-            const isNew = n.status !== "read";
+            const isNew = !n.read;
             return (
               <div key={n.id} onClick={() => markOneRead(n)}
                 className={`bg-white rounded-2xl border px-4 py-4 flex items-start gap-3 hover:shadow-md transition-shadow cursor-pointer ${isNew ? "border-[#c9a84c]/30 bg-amber-50/20" : "border-gray-100"}`}>

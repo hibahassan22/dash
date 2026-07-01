@@ -126,12 +126,13 @@ export async function addTripPayment(tripId, payment) {
     if (val != null && val !== "") fd.append(key, String(val));
   };
 
-  append("amount_paid", payment.amount_paid);
+  append("total_price", payment.total_price);
+  append("paid_amount", payment.paid_amount ?? payment.amount_paid);
+  append("from_account", payment.from_account ?? payment.account_number);
+  append("to_account", payment.to_account ?? payment.recipient_account);
   append("transfer_method", payment.transfer_method);
-  append("account_number", payment.account_number);
-  append("recipient_account", payment.recipient_account);
-  append("commission_transfer_date", payment.commission_transfer_date);
-  append("payment_note", payment.payment_note);
+  append("notes", payment.notes ?? payment.payment_note);
+  append("payment_date", payment.payment_date ?? payment.commission_transfer_date);
   if (payment.transfer_image) fd.append("transfer_image", payment.transfer_image);
 
   const res = await fetch(`${API_BASE}/trips/${tripId}/add-payment`, {
@@ -261,6 +262,25 @@ const OFFERED_STATUS_OPTIONS = [
   { value: "cancelled", label: "ملغية" },
 ];
 
+const TRIP_STATUS_TO_EDIT_STATUS = {
+  pending: "pending",
+  offered: "offered",
+  completed: "completed",
+  cancelled: "cancelled",
+  معلقة: "pending",
+  معروضة: "offered",
+  "قيد التنفيذ": "offered",
+  تم: "completed",
+  ملغية: "cancelled",
+  موقوفة: "pending",
+};
+
+function resolveTripEditStatus(trip) {
+  const raw = trip?.status ?? trip?.trip_status;
+  if (raw != null && TRIP_STATUS_TO_EDIT_STATUS[raw]) return TRIP_STATUS_TO_EDIT_STATUS[raw];
+  return "pending";
+}
+
 export { OFFERED_STATUS_OPTIONS };
 
 export function buildOfferedTripEditForm(trip) {
@@ -302,7 +322,7 @@ export function buildOfferedTripEditForm(trip) {
     departure_time: String(trip.departure_time ?? "").slice(0, 5),
     return_time: String(trip.return_time ?? "").slice(0, 5),
     trip_notes: trip.trip_notes ?? trip.notes ?? "",
-    status: trip.status ?? "pending",
+    status: resolveTripEditStatus(trip),
     passengers_count: trip.passengers_count ?? "",
     operation_days_text: Array.isArray(trip.operation_days)
       ? trip.operation_days.join("، ")
@@ -365,11 +385,12 @@ export function buildOfferedTripUpdatePayload(form, original) {
   return payload;
 }
 
-/** PUT /api/TripWithout/{id} — تعديل رحلة معروضة */
+/** PUT /api/TripWithout/{id} — تعديل رحلة */
 export async function updateOfferedTrip(tripId, form, original) {
   const payload = buildOfferedTripUpdatePayload(form, original);
   if (!Object.keys(payload).length) {
-    return fetchTripWithoutDriverById(tripId);
+    const trip = await fetchTripWithoutDriverById(tripId).catch(() => fetchTripById(tripId));
+    return { trip, message: "لا توجد تغييرات" };
   }
 
   const res = await fetch(`${API_BASE}/TripWithout/${tripId}`, {
@@ -379,8 +400,11 @@ export async function updateOfferedTrip(tripId, form, original) {
   });
   const json = await parseJsonResponse(res);
   const updated = normalizeTripResponse(json);
-  if (updated?.id) return updated;
-  return fetchTripWithoutDriverById(tripId);
+  let trip = updated?.id ? updated : null;
+  if (!trip) {
+    trip = await fetchTripWithoutDriverById(tripId).catch(() => fetchTripById(tripId));
+  }
+  return { ...json, trip, message: json?.message };
 }
 
 function valuesEqual(a, b) {

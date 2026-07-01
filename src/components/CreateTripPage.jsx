@@ -385,7 +385,8 @@ export default function CreateTripPage() {
         isOpen={editModal.open}
         trip={editModal.trip}
         onClose={() => setEditModal({ open: false, trip: null })}
-        onSuccess={(updated) => {
+        onSuccess={(result) => {
+          const updated = result?.trip ?? result;
           if (updated?.id) {
             setTrips((prev) => prev.map((t) => (t.id === updated.id ? { ...t, ...updated } : t)));
           } else {

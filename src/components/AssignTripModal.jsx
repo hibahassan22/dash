@@ -15,7 +15,6 @@ const EMPTY_FORM = {
   to_account: "",
   transfer_method: "تحويل بنكي",
   notes: "",
-  payer_type: "",
   transfer_image: null,
 };
 
@@ -91,7 +90,6 @@ export default function AssignTripModal({
       if (form.to_account) fd.append("to_account", form.to_account);
       if (form.transfer_method) fd.append("transfer_method", form.transfer_method);
       if (form.notes) fd.append("notes", form.notes);
-      if (form.payer_type) fd.append("payer_type", form.payer_type);
       if (form.transfer_image) fd.append("transfer_image", form.transfer_image);
 
       const res = await fetch(`${API_BASE}/trips/${resolvedTripId}/assign-driver`, {
@@ -218,14 +216,6 @@ export default function AssignTripModal({
             </>
           )}
 
-          <ModalField label="نوع الدافع">
-            <select value={form.payer_type} onChange={(e) => set("payer_type", e.target.value)} className={`${inputCls} appearance-none`}>
-              <option value="">اختر...</option>
-              <option value="driver">السائق</option>
-              <option value="company">الشركة</option>
-              <option value="client">العميل</option>
-            </select>
-          </ModalField>
         </div>
 
         <div className="bg-white rounded-xl border border-gray-100 p-4 space-y-3 shadow-sm">

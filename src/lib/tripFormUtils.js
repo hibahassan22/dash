@@ -46,6 +46,7 @@ export function buildPrimaryPassenger({
   fullName,
   nationality,
   gender,
+  phone,
   operationDays,
   fromCoords,
   toCoords,
@@ -60,6 +61,8 @@ export function buildPrimaryPassenger({
     nationality: nationality || "سعودي",
     gender: gender || "ذكر",
   };
+
+  if (phone) passenger.phone = phone;
 
   if (routeType === "multi" || direction === "both") {
     passenger.operation_days = operationDays;
@@ -117,6 +120,8 @@ export function buildTripCreatePayload(form) {
   if (form.accountNumber) payload.account_number = form.accountNumber;
   if (form.ourCommission) payload.our_commission = Number(form.ourCommission);
   if (form.commissionTransferDate) payload.commission_transfer_date = form.commissionTransferDate;
+  if (form.driverGender) payload.driver_gender = form.driverGender;
+  if (form.driverNat) payload.driver_nationality = form.driverNat;
 
   if (form.customerId && form.clientName) {
     payload["الراكب الاساسي"] = buildPrimaryPassenger({
@@ -124,6 +129,7 @@ export function buildTripCreatePayload(form) {
       fullName: form.clientName,
       nationality: form.nationality,
       gender: form.clientGender,
+      phone: form.clientPhone,
       operationDays,
       fromCoords: form.fromCoords,
       toCoords: form.toCoords,

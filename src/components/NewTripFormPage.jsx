@@ -1,10 +1,16 @@
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import AppModal, { modalInputClass } from "./ui/AppModal";
 import { fetchSalesList } from "../services/salesService.js";
 import { createTripWithoutDriver } from "../services/tripService.js";
 import { fetchCustomersList } from "../services/customerService.js";
+import AddClientModal from "./clients/AddClientModal";
 import { buildTripCreatePayload } from "../lib/tripFormUtils.js";
+import {
+  sanitizePhoneInput,
+  validatePhoneTenDigits,
+  normalizeSaudiPhoneFromApi,
+} from "../lib/phoneValidation.js";
 
 // ── Map Picker Modal (OpenStreetMap + Leaflet via CDN) ─────────────
 function MapPickerModal({ title, onClose, onConfirm }) {
@@ -165,6 +171,31 @@ const Input = (props) => (
   <input {...props} className="w-full rounded-xl border border-gray-200 px-3 py-2.5 text-sm focus:border-[#c9a84c] focus:outline-none bg-white text-right placeholder-gray-300" />
 );
 
+function SaudiPhoneInput({ value, onChange, disabled, invalid, hint }) {
+  return (
+    <div className="space-y-1">
+      <div className="flex gap-2" dir="ltr">
+        <span className="shrink-0 flex items-center px-3 py-2.5 rounded-xl border border-gray-200 bg-gray-50 text-sm text-gray-600 font-medium">
+          +966
+        </span>
+        <input
+          type="tel"
+          inputMode="numeric"
+          value={value}
+          onChange={(e) => onChange(sanitizePhoneInput(e.target.value))}
+          placeholder="05xxxxxxxx"
+          maxLength={10}
+          disabled={disabled}
+          className={`flex-1 rounded-xl border px-3 py-2.5 text-sm focus:outline-none bg-white text-left placeholder-gray-300 ${
+            invalid ? "border-red-300 focus:border-red-400" : "border-gray-200 focus:border-[#c9a84c]"
+          }`}
+        />
+      </div>
+      {hint && <p className={`text-[11px] text-right ${invalid ? "text-red-600" : "text-gray-400"}`}>{hint}</p>}
+    </div>
+  );
+}
+
 const Sel = ({ children, value, onChange }) => (
   <div className="relative">
     <select value={value} onChange={onChange} className="w-full rounded-xl border border-gray-200 px-3 py-2.5 text-sm focus:border-[#c9a84c] focus:outline-none bg-white text-right appearance-none">{children}</select>
@@ -196,6 +227,34 @@ const PinIcon = () => (
     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
   </svg>
 );
+
+function createEmptyStop() {
+  return {
+    fromCity: "",
+    toCity: "",
+    fromCoords: null,
+    toCoords: null,
+    fromLabel: "",
+    toLabel: "",
+  };
+}
+
+function MapPointButton({ label, hasCoords, onClick, placeholder = "اختر من الخريطة" }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`w-full rounded-xl border px-3 py-2.5 text-sm text-right flex items-center justify-between transition-colors ${
+        hasCoords ? "border-[#c9a84c] bg-amber-50 text-gray-800" : "border-gray-200 bg-white text-gray-400 hover:border-[#c9a84c]"
+      }`}
+    >
+      <svg className="w-4 h-4 text-[#c9a84c] shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
+      </svg>
+      <span className="flex-1 text-right mr-2 truncate text-xs">{label || placeholder}</span>
+    </button>
+  );
+}
 
 const DAYS = [
   { id: "sat", short: "س", label: "السبت" }, { id: "sun", short: "ح", label: "الأحد" },
@@ -486,7 +545,21 @@ function TimeFields({ isBoth, sameTime, onToggleSameTime }) {
 // returns { routeSection, timeSection } — each is JSX or null
 // For single+go (or single+both): route is standalone section, time is standalone section
 // For multi: combined per-day cards
-function useScheduleSections({ passengers, routeType, direction, subType, activeDays, dateFrom, useMap, sameTime, onToggleSameTime, onToggleUseMap }) {
+function useScheduleSections({
+  passengers,
+  routeType,
+  direction,
+  subType,
+  activeDays,
+  dateFrom,
+  useMap,
+  sameTime,
+  onToggleSameTime,
+  onToggleUseMap,
+  multiDayRoutes,
+  onDayStopsChange,
+  onOpenDayMap,
+}) {
   const isMulti = routeType === "multi";
   const isBoth  = direction === "both";
   const isMonthly = subType === "monthly";
@@ -511,11 +584,18 @@ function useScheduleSections({ passengers, routeType, direction, subType, active
 
   const multiContent = (
     <div className="space-y-4">
-      <p className="text-xs text-gray-500 text-right">🔁 نقطة الانطلاق والنهاية</p>
-      <Toggle on={useMap} onToggle={onToggleUseMap} label="تحديد الموقع من الخريطة" sub="يتم تحديد الموقع من خريطة جوجل" />
+      <p className="text-xs text-gray-500 text-right">اضغط على نقطة الانطلاق أو الوصول لفتح الخريطة لكل يوم</p>
       <Toggle on={sameTime} onToggle={onToggleSameTime} label="استخدام نمط موحد لجميع الأيام" sub="نفس التوقيت لكل أيام الأسبوع" />
       {dayRows.map((row, i) => (
-        <DayRouteRow key={i} label={row.label} isBoth={isBoth} idx={i} />
+        <DayRouteRow
+          key={i}
+          label={row.label}
+          isBoth={isBoth}
+          idx={i}
+          stops={multiDayRoutes[i] ?? [createEmptyStop()]}
+          onStopsChange={(stops) => onDayStopsChange(i, stops)}
+          onOpenMap={(stopIdx, type) => onOpenDayMap(i, stopIdx, type)}
+        />
       ))}
     </div>
   );
@@ -523,26 +603,59 @@ function useScheduleSections({ passengers, routeType, direction, subType, active
 }
 
 // ── Per-day route row ──────────────────────────────────────────────
-function DayRouteRow({ label, isBoth, idx }) {
-  const [stops, setStops] = useState([{ from: "", to: "" }]);
+function DayRouteRow({ label, isBoth, stops, onStopsChange, onOpenMap }) {
   const [departTime, setDepartTime] = useState("");
   const [returnTime, setReturnTime] = useState("");
   const [showCopy, setShowCopy] = useState(false);
 
-  const addStop = () => setStops(p => [...p, { from: "", to: "" }]);
+  const addStop = () => onStopsChange([...stops, createEmptyStop()]);
+
+  const updateStop = (stopIdx, patch) => {
+    onStopsChange(stops.map((s, i) => (i === stopIdx ? { ...s, ...patch } : s)));
+  };
 
   return (
     <div className="border border-gray-100 rounded-xl overflow-hidden">
       <div className="flex items-center justify-between bg-gray-50/70 px-4 py-2.5">
-        <button onClick={() => setShowCopy(true)} className="text-xs text-white bg-[#c9a84c] hover:bg-[#b8973d] px-3 py-1.5 rounded-lg transition-colors">نسخ من يوم آخر</button>
+        <button type="button" onClick={() => setShowCopy(true)} className="text-xs text-white bg-[#c9a84c] hover:bg-[#b8973d] px-3 py-1.5 rounded-lg transition-colors">نسخ من يوم آخر</button>
         <p className="text-xs font-semibold text-gray-700">{label}</p>
       </div>
       <div className="p-4 space-y-3">
-        {stops.map((_, si) => (
+        {stops.map((stop, si) => (
           <div key={si} className="space-y-3">
             <div className="grid grid-cols-2 gap-3">
-              <Field label="نقطة الوصول"><div className="relative"><input placeholder="ادخل نقطة الوصول" className="w-full rounded-xl border border-gray-200 pr-3 pl-9 py-2.5 text-sm focus:border-[#c9a84c] focus:outline-none bg-white text-right placeholder-gray-300" /><PinIcon /></div></Field>
-              <Field label="نقطة الانطلاق"><div className="relative"><input placeholder="ادخل نقطة الانطلاق" className="w-full rounded-xl border border-gray-200 pr-3 pl-9 py-2.5 text-sm focus:border-[#c9a84c] focus:outline-none bg-white text-right placeholder-gray-300" /><PinIcon /></div></Field>
+              <Field label="نقطة الوصول *">
+                <MapPointButton
+                  label={stop.toLabel}
+                  hasCoords={!!stop.toCoords}
+                  onClick={() => onOpenMap(si, "to")}
+                  placeholder="ادخل نقطة الوصول"
+                />
+              </Field>
+              <Field label="نقطة الانطلاق *">
+                <MapPointButton
+                  label={stop.fromLabel}
+                  hasCoords={!!stop.fromCoords}
+                  onClick={() => onOpenMap(si, "from")}
+                  placeholder="ادخل نقطة الانطلاق"
+                />
+              </Field>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <Field label="مكان الوصول">
+                <Input
+                  placeholder="ادخل نقطة الوصول"
+                  value={stop.toCity}
+                  onChange={(e) => updateStop(si, { toCity: e.target.value })}
+                />
+              </Field>
+              <Field label="مكان الانطلاق">
+                <Input
+                  placeholder="ادخل نقطة الانطلاق"
+                  value={stop.fromCity}
+                  onChange={(e) => updateStop(si, { fromCity: e.target.value })}
+                />
+              </Field>
             </div>
             {isBoth ? (
               <div className="grid grid-cols-2 gap-3">
@@ -554,7 +667,7 @@ function DayRouteRow({ label, isBoth, idx }) {
             )}
           </div>
         ))}
-        <button onClick={addStop} className="flex items-center gap-1.5 border border-dashed border-gray-300 text-gray-500 text-xs px-3 py-2 rounded-xl hover:border-[#c9a84c] hover:text-[#c9a84c] transition-colors w-full justify-center">
+        <button type="button" onClick={addStop} className="flex items-center gap-1.5 border border-dashed border-gray-300 text-gray-500 text-xs px-3 py-2 rounded-xl hover:border-[#c9a84c] hover:text-[#c9a84c] transition-colors w-full justify-center">
           <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" /></svg>
           إضافة محطة
         </button>
@@ -694,6 +807,7 @@ export default function NewTripFormPage() {
   const [customersLoading, setCustomersLoading] = useState(true);
   const [customersError, setCustomersError] = useState(null);
   const [customerId,  setCustomerId]  = useState("");
+  const [showAddClient, setShowAddClient] = useState(false);
   const [clientName,  setClientName]  = useState("");
   const [clientPhone, setClientPhone] = useState("");
   const [nationality, setNationality] = useState("سعودي");
@@ -739,29 +853,76 @@ export default function NewTripFormPage() {
     const c = customers.find((x) => String(x.id) === String(id));
     if (c) {
       setClientName(c.name ?? c.full_name ?? "");
-      setClientPhone(c.phone ?? "");
+      setClientPhone(normalizeSaudiPhoneFromApi(c.phone ?? ""));
       setNationality(c.nationality ?? "سعودي");
       setClientGender(c.gender ?? "");
     }
   };
 
+  const handleClientAdded = (created) => {
+    if (!created?.id) return;
+    setCustomers((prev) => {
+      const exists = prev.some((c) => String(c.id) === String(created.id));
+      return exists ? prev : [created, ...prev];
+    });
+    setCustomersError(null);
+    setCustomerId(String(created.id));
+    setClientName(created.name ?? created.full_name ?? "");
+    setClientPhone(normalizeSaudiPhoneFromApi(created.phone ?? ""));
+    setNationality(created.nationality ?? "سعودي");
+    setClientGender(created.gender ?? "");
+  };
+
+  const phoneValidation = useMemo(() => validatePhoneTenDigits(clientPhone), [clientPhone]);
+  const phoneInvalid = clientPhone.length > 0 && !phoneValidation.valid;
+
   // ── Map picker ─────────────────────────────────────────────────
-  const [mapTarget, setMapTarget] = useState(null); // "from" | "to"
-  const [fromCoords, setFromCoords] = useState(null); // { lat, lng }
+  const [mapTarget, setMapTarget] = useState(null);
+  const [fromCoords, setFromCoords] = useState(null);
   const [toCoords,   setToCoords]   = useState(null);
   const [fromLabel,  setFromLabel]  = useState("");
   const [toLabel,    setToLabel]    = useState("");
+  const [multiDayRoutes, setMultiDayRoutes] = useState({});
+
+  const handleDayStopsChange = useCallback((dayIdx, stops) => {
+    setMultiDayRoutes((prev) => ({ ...prev, [dayIdx]: stops }));
+  }, []);
+
+  const openDayMap = useCallback((dayIdx, stopIdx, type) => {
+    setMapTarget({ scope: "day", dayIdx, stopIdx, type });
+  }, []);
 
   const handleMapConfirm = (coords) => {
-    if (mapTarget === "from") {
+    const label = `${coords.lat.toFixed(5)}, ${coords.lng.toFixed(5)}`;
+    if (!mapTarget) return;
+
+    if (mapTarget.scope === "day") {
+      const { dayIdx, stopIdx, type } = mapTarget;
+      setMultiDayRoutes((prev) => {
+        const dayStops = [...(prev[dayIdx] ?? [createEmptyStop()])];
+        while (dayStops.length <= stopIdx) dayStops.push(createEmptyStop());
+        const patch =
+          type === "from"
+            ? { fromCoords: coords, fromLabel: label }
+            : { toCoords: coords, toLabel: label };
+        dayStops[stopIdx] = { ...dayStops[stopIdx], ...patch };
+        return { ...prev, [dayIdx]: dayStops };
+      });
+    } else if (mapTarget === "from") {
       setFromCoords(coords);
-      setFromLabel(`${coords.lat.toFixed(5)}, ${coords.lng.toFixed(5)}`);
+      setFromLabel(label);
     } else {
       setToCoords(coords);
-      setToLabel(`${coords.lat.toFixed(5)}, ${coords.lng.toFixed(5)}`);
+      setToLabel(label);
     }
     setMapTarget(null);
   };
+
+  const mapModalTitle = !mapTarget
+    ? "اختر الموقع"
+    : mapTarget === "to" || mapTarget?.type === "to"
+      ? "اختر نقطة الوصول"
+      : "اختر نقطة الانطلاق";
 
   // ── Submit ─────────────────────────────────────────────────────
   const [submitting, setSubmitting] = useState(false);
@@ -772,18 +933,40 @@ export default function NewTripFormPage() {
       setSubmitError("اختر العميل (الراكب الأساسي) من القائمة");
       return;
     }
-    if (!fromCoords || !toCoords) {
-      setSubmitError("حدد نقطة الانطلاق والوصول من الخريطة");
+    if (!phoneValidation.valid) {
+      setSubmitError(phoneValidation.message || "أدخل رقم هاتف سعودي صحيح (10 أرقام)");
       return;
     }
-    if (!fromCity.trim() || !toCity.trim()) {
-      setSubmitError("أدخل اسم مكان الانطلاق والوصول");
-      return;
+    if (routeType === "multi") {
+      const dayCount = subType === "monthly"
+        ? getActiveDaysInMonth(activeDays, dateFrom).length
+        : activeDays.length;
+      for (let i = 0; i < dayCount; i++) {
+        const stop = multiDayRoutes[i]?.[0];
+        if (!stop?.fromCoords || !stop?.toCoords) {
+          setSubmitError("حدد نقطة الانطلاق والوصول من الخريطة لكل يوم");
+          return;
+        }
+        if (!stop.fromCity?.trim() || !stop.toCity?.trim()) {
+          setSubmitError("أدخل مكان الانطلاق والوصول لكل يوم");
+          return;
+        }
+      }
+    } else {
+      if (!fromCoords || !toCoords) {
+        setSubmitError("حدد نقطة الانطلاق والوصول من الخريطة");
+        return;
+      }
+      if (!fromCity.trim() || !toCity.trim()) {
+        setSubmitError("أدخل اسم مكان الانطلاق والوصول");
+        return;
+      }
     }
 
     setSubmitting(true);
     setSubmitError(null);
     try {
+      const firstMultiStop = multiDayRoutes[0]?.[0];
       const payload = buildTripCreatePayload({
         passengers,
         routeType,
@@ -796,16 +979,20 @@ export default function NewTripFormPage() {
         riderCount,
         price,
         notes,
-        fromCity,
-        toCity,
-        fromCoords,
-        toCoords,
+        fromCity: routeType === "multi" ? (firstMultiStop?.fromCity || fromCity) : fromCity,
+        toCity: routeType === "multi" ? (firstMultiStop?.toCity || toCity) : toCity,
+        fromCoords: routeType === "multi" ? firstMultiStop?.fromCoords : fromCoords,
+        toCoords: routeType === "multi" ? firstMultiStop?.toCoords : toCoords,
+        multiDayRoutes: routeType === "multi" ? multiDayRoutes : undefined,
         selectedSales,
         carSize,
         customerId,
         clientName,
+        clientPhone: phoneValidation.normalized ?? clientPhone,
         nationality,
         clientGender,
+        driverGender,
+        driverNat,
         transferMethod,
         bankName,
         accountNumber,
@@ -833,7 +1020,12 @@ export default function NewTripFormPage() {
     useMap, sameTime,
     onToggleUseMap: () => setUseMap(v => !v),
     onToggleSameTime: () => setSameTime(v => !v),
+    multiDayRoutes,
+    onDayStopsChange: handleDayStopsChange,
+    onOpenDayMap: openDayMap,
   });
+
+  const isMultiRoute = routeType === "multi";
 
   const isGroup = passengers === "group";
   // جماعي + مسارات مختلفة + ذهاب وعودة → per-passenger section
@@ -926,8 +1118,8 @@ export default function NewTripFormPage() {
         </div>
       </Section>
 
-      {/* مسار الرحلة — single route only */}
-      {!isGroupMulti && routeContent && (
+      {/* مسار الرحلة — مسار واحد فقط */}
+      {!isGroupMulti && !isMultiRoute && (
         <Section title="مسار الرحلة" sub="حد نقطة الانطلاق والوصول بسهولة"
           icon={<svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" /></svg>}>
           <div className="space-y-3">
@@ -942,24 +1134,10 @@ export default function NewTripFormPage() {
             </div>
             <div className="grid grid-cols-2 gap-3">
               <Field label="إحداثيات الوصول *">
-                <button
-                  type="button"
-                  onClick={() => setMapTarget("to")}
-                  className={`w-full rounded-xl border px-3 py-2.5 text-sm text-right flex items-center justify-between transition-colors ${toCoords ? "border-[#c9a84c] bg-amber-50 text-gray-800" : "border-gray-200 bg-white text-gray-400 hover:border-[#c9a84c]"}`}
-                >
-                  <svg className="w-4 h-4 text-[#c9a84c] shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" /></svg>
-                  <span className="flex-1 text-right mr-2 truncate text-xs">{toLabel || "اختر من الخريطة"}</span>
-                </button>
+                <MapPointButton label={toLabel} hasCoords={!!toCoords} onClick={() => setMapTarget("to")} />
               </Field>
               <Field label="إحداثيات الانطلاق *">
-                <button
-                  type="button"
-                  onClick={() => setMapTarget("from")}
-                  className={`w-full rounded-xl border px-3 py-2.5 text-sm text-right flex items-center justify-between transition-colors ${fromCoords ? "border-[#c9a84c] bg-amber-50 text-gray-800" : "border-gray-200 bg-white text-gray-400 hover:border-[#c9a84c]"}`}
-                >
-                  <svg className="w-4 h-4 text-[#c9a84c] shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" /></svg>
-                  <span className="flex-1 text-right mr-2 truncate text-xs">{fromLabel || "اختر من الخريطة"}</span>
-                </button>
+                <MapPointButton label={fromLabel} hasCoords={!!fromCoords} onClick={() => setMapTarget("from")} />
               </Field>
             </div>
           </div>
@@ -1023,21 +1201,32 @@ export default function NewTripFormPage() {
           icon={<svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" /></svg>}>
           <div className="space-y-3">
             <Field label="الراكب الأساسي (من العملاء) *">
-              <Sel value={customerId} onChange={(e) => handleCustomerSelect(e.target.value)} disabled={customersLoading}>
-                <option value="">
-                  {customersLoading ? "جاري تحميل العملاء..." : customers.length ? "اختر العميل" : "لا يوجد عملاء — أضف من صفحة العملاء"}
-                </option>
-                {customers.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.name} — {c.phone || "بدون هاتف"}
-                  </option>
-                ))}
-              </Sel>
+              <div className="flex gap-2 items-stretch">
+                <div className="flex-1 min-w-0">
+                  <Sel value={customerId} onChange={(e) => handleCustomerSelect(e.target.value)} disabled={customersLoading}>
+                    <option value="">
+                      {customersLoading ? "جاري تحميل العملاء..." : customers.length ? "اختر العميل" : "لا يوجد عملاء — أضف عميلاً جديداً"}
+                    </option>
+                    {customers.map((c) => (
+                      <option key={c.id} value={c.id}>
+                        {c.name} — {c.phone || "بدون هاتف"}
+                      </option>
+                    ))}
+                  </Sel>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowAddClient(true)}
+                  className="shrink-0 px-3 py-2 rounded-xl border border-[#c9a84c] text-[#c9a84c] text-xs font-bold hover:bg-amber-50 transition-colors whitespace-nowrap"
+                >
+                  + إضافة عميل
+                </button>
+              </div>
               {customersError && (
                 <p className="text-[11px] text-red-600 text-right mt-1">{customersError}</p>
               )}
               {!customersLoading && !customersError && customers.length === 0 && (
-                <p className="text-[11px] text-amber-700 text-right mt-1">لا توجد عملاء في النظام. أضف عميلاً من صفحة العملاء أولاً.</p>
+                <p className="text-[11px] text-amber-700 text-right mt-1">لا توجد عملاء — اضغط «إضافة عميل» لإنشاء عميل وربطه بالرحلة.</p>
               )}
             </Field>
             {isGroup && (
@@ -1048,7 +1237,20 @@ export default function NewTripFormPage() {
               </Field>
             )}
             <div className="grid grid-cols-2 gap-3">
-              <Field label="الهاتف"><Input placeholder="ادخل الهاتف" value={clientPhone} onChange={e => setClientPhone(e.target.value)} dir="ltr" /></Field>
+              <Field label="الهاتف *">
+                <SaudiPhoneInput
+                  value={clientPhone}
+                  onChange={setClientPhone}
+                  invalid={phoneInvalid}
+                  hint={
+                    phoneInvalid
+                      ? phoneValidation.message
+                      : clientPhone.length > 0
+                        ? "10 أرقام — مثال: 05xxxxxxxx"
+                        : "كود السعودية +966 — 10 أرقام"
+                  }
+                />
+              </Field>
               <Field label="الاسم"><Input placeholder="ادخل الاسم" value={clientName} onChange={e => setClientName(e.target.value)} /></Field>
             </div>
             <Field label="الجنسية">
@@ -1067,8 +1269,20 @@ export default function NewTripFormPage() {
         icon={<svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7h12m0 0l-4-4m4 4l-4 4m0 5H4m0 0l4 4m-4-4l4-4" /></svg>}>
         <div className="space-y-4">
           <div className="grid grid-cols-2 gap-3">
-            <Field label="نوع جنس السائق المطلوب"><Sel value={driverGender} onChange={e => setDriverGender(e.target.value)}><option value="">اختر الجنس</option><option>ذكر</option><option>أنثى</option></Sel></Field>
-            <Field label="جنسية السائق المقترحة"><Sel value={driverNat} onChange={e => setDriverNat(e.target.value)}><option value="">اختر الجنسية</option><option>سعودي</option><option>غير سعودي</option></Sel></Field>
+            <Field label="نوع جنس السائق المطلوب (اختياري)">
+              <Sel value={driverGender} onChange={e => setDriverGender(e.target.value)}>
+                <option value="">غير ضرورى</option>
+                <option>ذكر</option>
+                <option>أنثى</option>
+              </Sel>
+            </Field>
+            <Field label="جنسية السائق المقترحة (اختياري)">
+              <Sel value={driverNat} onChange={e => setDriverNat(e.target.value)}>
+                <option value="">غير ضرورى</option>
+                <option>سعودي</option>
+                <option>غير سعودي</option>
+              </Sel>
+            </Field>
           </div>
           <Field label="حجم السيارة المطلوب">
             <div className="grid grid-cols-3 gap-2">
@@ -1149,7 +1363,7 @@ export default function NewTripFormPage() {
       {/* Map Picker Modal */}
       {mapTarget && (
         <MapPickerModal
-          title={mapTarget === "from" ? "اختر نقطة الانطلاق" : "اختر نقطة الوصول"}
+          title={mapModalTitle}
           onClose={() => setMapTarget(null)}
           onConfirm={handleMapConfirm}
         />
@@ -1165,6 +1379,12 @@ export default function NewTripFormPage() {
           }}
         />
       )}
+
+      <AddClientModal
+        isOpen={showAddClient}
+        onClose={() => setShowAddClient(false)}
+        onSuccess={handleClientAdded}
+      />
     </div>
   );
 }

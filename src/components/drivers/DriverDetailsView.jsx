@@ -1,9 +1,9 @@
 import { useState, useEffect, useCallback } from "react";
-import { Plus, RefreshCw, Eye, Edit2, MapPin, Calendar } from "lucide-react";
+import { Plus, Eye, Edit2, MapPin, Calendar } from "lucide-react";
 import AddPaymentModal from "../AddPaymentModal";
-import EditTripModal from "../EditTripModal";
+import EditOfferedTripModal from "../EditOfferedTripModal";
 import TripDetailModal from "../TripDetailModal";
-import TripChangeStatusModal from "../trip-details/TripChangeStatusModal";
+import { fetchTripDetailsById } from "../../services/tripService.js";
 import {
   DRIVER_IMAGE_FIELDS,
   normalizeMediaUrl,
@@ -124,11 +124,25 @@ function DriverTripsTab({ driverId, driverName, tripsCount, totalDues, refreshKe
   const [trips, setTrips] = useState([]);
   const [loading, setLoading] = useState(true);
   const [page, setPage] = useState(1);
-  const [paymentModal, setPaymentModal] = useState({ open: false, tripId: null });
-  const [statusModal, setStatusModal] = useState({ open: false, tripId: null });
+  const [paymentModal, setPaymentModal] = useState({ open: false, tripId: null, tripTotalPrice: "" });
   const [detailModal, setDetailModal] = useState({ open: false, tripId: null });
   const [editModal, setEditModal] = useState({ open: false, trip: null });
+  const [editLoading, setEditLoading] = useState(false);
   const PER_PAGE = 5;
+
+  const openEditTrip = useCallback(async (trip) => {
+    const tripId = trip?.id ?? trip?.trip_id;
+    if (!tripId) return;
+    setEditLoading(true);
+    try {
+      const { trip: fullTrip } = await fetchTripDetailsById(tripId);
+      setEditModal({ open: true, trip: fullTrip ?? trip });
+    } catch {
+      setEditModal({ open: true, trip });
+    } finally {
+      setEditLoading(false);
+    }
+  }, []);
 
   const loadTrips = useCallback(() => {
     if (!driverId) return;
@@ -260,18 +274,10 @@ function DriverTripsTab({ driverId, driverName, tripsCount, totalDues, refreshKe
 
                 <button
                   type="button"
-                  onClick={() => setPaymentModal({ open: true, tripId })}
+                  onClick={() => setPaymentModal({ open: true, tripId, tripTotalPrice: total })}
                   className="flex items-center justify-center gap-1 bg-[#474747] text-white text-xs py-1.5 px-3 rounded hover:bg-black transition-colors"
                 >
                   <Plus className="w-3.5 h-3.5" /> إضافة دفعة
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => setStatusModal({ open: true, tripId })}
-                  className="flex items-center justify-center gap-1 bg-white border border-gray-300 text-gray-700 text-xs py-1.5 px-3 rounded hover:bg-gray-50 transition-colors"
-                >
-                  <RefreshCw className="w-3.5 h-3.5 text-gray-400" /> تغيير الحالة
                 </button>
 
                 <button
@@ -285,8 +291,9 @@ function DriverTripsTab({ driverId, driverName, tripsCount, totalDues, refreshKe
 
                 <button
                   type="button"
-                  onClick={() => setEditModal({ open: true, trip })}
-                  className="flex items-center justify-center gap-1 bg-white border border-gray-300 text-gray-700 text-xs py-1.5 px-3 rounded hover:bg-gray-50 transition-colors"
+                  onClick={() => openEditTrip(trip)}
+                  disabled={editLoading}
+                  className="flex items-center justify-center gap-1 bg-white border border-gray-300 text-gray-700 text-xs py-1.5 px-3 rounded hover:bg-gray-50 transition-colors disabled:opacity-40"
                 >
                   <Edit2 className="w-3.5 h-3.5 text-gray-400" /> تعديل
                 </button>
@@ -335,34 +342,9 @@ function DriverTripsTab({ driverId, driverName, tripsCount, totalDues, refreshKe
 
       <AddPaymentModal
         isOpen={paymentModal.open}
-        onClose={() => setPaymentModal({ open: false, tripId: null })}
+        onClose={() => setPaymentModal({ open: false, tripId: null, tripTotalPrice: "" })}
         tripId={paymentModal.tripId}
-        onSuccess={(data) => {
-          const paidTripId = data?.trip_id ?? paymentModal.tripId;
-          if (paidTripId != null) {
-            setTrips((prev) =>
-              prev.map((t) => {
-                const id = t.id ?? t.trip_id;
-                if (String(id) !== String(paidTripId)) return t;
-                return {
-                  ...t,
-                  total_price: data.total_price ?? t.total_price,
-                  amount_paid: data.amount_paid ?? t.amount_paid,
-                  remaining_amount: data.remaining_amount ?? t.remaining_amount,
-                  transfer_image: data.transfer_image ?? t.transfer_image,
-                };
-              })
-            );
-          } else {
-            loadTrips();
-          }
-        }}
-      />
-
-      <TripChangeStatusModal
-        isOpen={statusModal.open}
-        onClose={() => setStatusModal({ open: false, tripId: null })}
-        tripId={statusModal.tripId}
+        tripTotalPrice={paymentModal.tripTotalPrice}
         onSuccess={() => loadTrips()}
       />
 
@@ -372,11 +354,15 @@ function DriverTripsTab({ driverId, driverName, tripsCount, totalDues, refreshKe
         tripId={detailModal.tripId}
       />
 
-      <EditTripModal
+      <EditOfferedTripModal
         isOpen={editModal.open}
         trip={editModal.trip}
+        title={editModal.trip ? `تعديل الرحلة #${editModal.trip.id ?? editModal.trip.trip_id}` : undefined}
         onClose={() => setEditModal({ open: false, trip: null })}
-        onSuccess={() => { setEditModal({ open: false, trip: null }); loadTrips(); }}
+        onSuccess={() => {
+          setEditModal({ open: false, trip: null });
+          loadTrips();
+        }}
       />
     </div>
   );

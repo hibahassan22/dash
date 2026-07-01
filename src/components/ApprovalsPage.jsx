@@ -1,5 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { useGlobalSearch } from "../hooks/useGlobalSearch";
+import { fetchAllRefunds } from "../services/refundService";
+import RefundHandleModal from "./approvals/RefundHandleModal";
 
 const BASE = "https://drivo1.elmoroj.com/api";
 
@@ -42,6 +44,7 @@ const FIELD_LABELS = {
 };
 
 const statusOptions = ["الكل", "معلق", "موافق", "مرفوض"];
+const typeOptions = ["الكل", "تعديل رحلة", "مرتجعات"];
 
 const typeConfig = {
   "تعديل رحلة": {
@@ -49,7 +52,18 @@ const typeConfig = {
     icon: "text-purple-500",
     d: "M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z",
   },
+  مرتجعات: {
+    bg: "bg-orange-50",
+    icon: "text-orange-500",
+    d: "M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z",
+  },
 };
+
+function fmtMoney(v) {
+  if (v == null || v === "") return "—";
+  const n = Number(v);
+  return Number.isFinite(n) ? n.toLocaleString("ar-SA") : String(v);
+}
 
 function fmtVal(val) {
   if (val === null || val === undefined || val === "") return "—";
@@ -126,6 +140,51 @@ function normalizeRequest(item) {
   };
 }
 
+function normalizeRefundStatus(raw) {
+  const s = String(raw ?? "بانتظار");
+  if (s === "بانتظار" || s === "pending" || s === "معلق") return normalizeStatus("معلق");
+  if (s === "تم القبول" || s.includes("قبول")) return normalizeStatus("موافق");
+  if (s === "تم الرفض" || s.includes("رفض")) return normalizeStatus("مرفوض");
+  return normalizeStatus(raw);
+}
+
+function normalizeRefund(item) {
+  const statusInfo = normalizeRefundStatus(item.status);
+  const created = item.date ?? item.created_at ?? "";
+
+  let date = "";
+  let time = "";
+  if (created) {
+    const d = new Date(String(created).replace(" ", "T"));
+    if (!Number.isNaN(d.getTime())) {
+      date = d.toLocaleDateString("ar-EG");
+      time = d.toLocaleTimeString("ar-EG", { hour: "2-digit", minute: "2-digit" });
+    } else {
+      date = String(created);
+    }
+  }
+
+  return {
+    id: item.id,
+    type: "مرتجعات",
+    status: statusInfo.label,
+    statusColor: statusInfo.color,
+    tripId: item.tripId ?? item.tripNumber,
+    from: item.from ?? "",
+    to: item.to ?? "",
+    driverName: item.driverName ?? "—",
+    driverNumber: item.driverNumber ?? "",
+    proposedAmount: item.proposedAmount,
+    reason: item.reason ?? "",
+    amountPaid: item.amountPaid,
+    totalPrice: item.totalPrice,
+    sales: item.sales ?? [],
+    date,
+    time,
+    raw: item,
+  };
+}
+
 function parseList(data) {
   if (Array.isArray(data)) return data;
   if (Array.isArray(data?.data)) return data.data;
@@ -136,33 +195,44 @@ function parseList(data) {
 
 export default function ApprovalsPage() {
   const [requests, setRequests] = useState([]);
+  const [refunds, setRefunds] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [statusFilter, setStatusFilter] = useState("الكل");
+  const [typeFilter, setTypeFilter] = useState("الكل");
   const { searchQuery, setSearchQuery } = useGlobalSearch();
   const [actionLoading, setActionLoading] = useState(null);
+  const [refundModal, setRefundModal] = useState(null);
 
-  const fetchRequests = useCallback(async () => {
+  const fetchAll = useCallback(async () => {
     setLoading(true);
     setError("");
     try {
-      const r = await fetch(`${BASE}/trip-edit-requeststest`, {
-        headers: { Accept: "application/json" },
-      });
-      if (!r.ok) throw new Error(`HTTP ${r.status}`);
-      const d = await r.json();
-      setRequests(parseList(d).map(normalizeRequest));
+      const [editRes, refundsData] = await Promise.all([
+        fetch(`${BASE}/trip-edit-requeststest`, { headers: { Accept: "application/json" } })
+          .then(async (r) => (r.ok ? r.json() : null))
+          .catch(() => null),
+        fetchAllRefunds().catch((e) => {
+          console.warn("fetchAllRefunds:", e);
+          return [];
+        }),
+      ]);
+      setRequests(editRes ? parseList(editRes).map(normalizeRequest) : []);
+      setRefunds(refundsData.map(normalizeRefund));
+      if (!editRes && !refundsData.length) {
+        setError("تعذر تحميل الطلبات. يرجى التحقق من اتصال الشبكة.");
+      }
     } catch (err) {
-      console.error("fetchRequests error:", err);
-      setError("حدث خطأ أثناء تحميل طلبات التعديل. يرجى التحقق من اتصال الشبكة.");
+      console.error("fetchAll error:", err);
+      setError("حدث خطأ أثناء تحميل الطلبات. يرجى التحقق من اتصال الشبكة.");
     } finally {
       setLoading(false);
     }
   }, []);
 
   useEffect(() => {
-    fetchRequests();
-  }, [fetchRequests]);
+    fetchAll();
+  }, [fetchAll]);
 
   const handleApprove = async (id) => {
     setActionLoading(id);
@@ -173,7 +243,7 @@ export default function ApprovalsPage() {
       });
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
       await r.json();
-      fetchRequests();
+      fetchAll();
     } catch (err) {
       console.error("handleApprove error:", err);
       alert("حدث خطأ أثناء الموافقة على الطلب");
@@ -191,7 +261,7 @@ export default function ApprovalsPage() {
       });
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
       await r.json();
-      fetchRequests();
+      fetchAll();
     } catch (err) {
       console.error("handleReject error:", err);
       alert("حدث خطأ أثناء رفض الطلب");
@@ -200,18 +270,173 @@ export default function ApprovalsPage() {
     }
   };
 
-  const filtered = requests.filter((r) => {
+  const allItems = [...requests, ...refunds];
+
+  const filtered = allItems.filter((r) => {
+    const matchType = typeFilter === "الكل" || r.type === typeFilter;
     const matchStatus = statusFilter === "الكل" || r.status === statusFilter;
     const q = searchQuery.trim();
     const matchSearch =
       q === "" ||
-      r.submittedBy.includes(q) ||
+      String(r.submittedBy ?? "").includes(q) ||
+      String(r.driverName ?? "").includes(q) ||
       String(r.id).includes(q) ||
       String(r.tripId ?? "").includes(q);
-    return matchStatus && matchSearch;
+    return matchType && matchStatus && matchSearch;
   });
 
-  const config = typeConfig["تعديل رحلة"];
+  const renderEditRequest = (req) => {
+    const config = typeConfig["تعديل رحلة"];
+    return (
+      <div key={`edit-${req.id}`} className="border border-gray-100 rounded-xl p-4 space-y-3 hover:bg-gray-50/40 transition-colors">
+        <div className="flex items-center justify-end gap-2">
+          <span className="text-xs text-gray-400 font-mono">{req.id}#</span>
+          <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${req.statusColor}`}>{req.status}</span>
+          <span className="text-sm font-semibold text-gray-700">{req.type}</span>
+          <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${config.bg}`}>
+            <svg className={`w-4 h-4 ${config.icon}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d={config.d} />
+            </svg>
+          </div>
+        </div>
+
+        <div className="text-right">
+          {req.tripId && (
+            <p className="text-sm font-bold text-gray-800">
+              #{req.tripId}
+              {(req.from || req.to) && (
+                <>
+                  {" "}
+                  {req.from}
+                  {req.from && req.to && <span className="text-gray-400 mx-1">→</span>}
+                  {req.to}
+                </>
+              )}
+            </p>
+          )}
+          <div className="flex items-center justify-end gap-2 mt-1 text-xs text-gray-400 flex-wrap">
+            <span>مقدم من: {req.submittedFrom} ({req.submittedBy})</span>
+            {(req.date || req.time) && (
+              <>
+                <span className="text-gray-300">•</span>
+                <span>{req.date}{req.time && ` • ${req.time}`}</span>
+              </>
+            )}
+          </div>
+        </div>
+
+        <div className="bg-gray-50 rounded-xl p-3 space-y-1.5">
+          <p className="text-xs font-semibold text-gray-500 text-right mb-2">التغييرات المطلوبة</p>
+          {req.changes.length > 0 ? (
+            req.changes.map((ch, ci) => (
+              <div key={ci} className="flex items-center justify-end gap-2 text-xs">
+                <span className="text-green-600 font-medium">{ch.to}</span>
+                <span className="text-gray-300">←</span>
+                <span className="text-red-400 line-through">{ch.from}</span>
+                <span className="text-gray-500 font-medium">{ch.label}:</span>
+              </div>
+            ))
+          ) : (
+            <p className="text-xs text-gray-400 text-right">لا توجد تفاصيل تغيير متاحة</p>
+          )}
+        </div>
+
+        {req.status === "معلق" && (
+          <div className="grid grid-cols-2 gap-3 pt-1">
+            <button
+              disabled={actionLoading === req.id}
+              onClick={() => handleReject(req.id)}
+              className="flex items-center justify-center gap-2 bg-red-500 hover:bg-red-600 text-white text-sm font-medium py-2.5 rounded-xl transition-colors disabled:opacity-50"
+            >
+              {actionLoading === req.id ? "جارٍ الرفض..." : "رفض الطلب"}
+            </button>
+            <button
+              disabled={actionLoading === req.id}
+              onClick={() => handleApprove(req.id)}
+              className="flex items-center justify-center gap-2 bg-green-500 hover:bg-green-600 text-white text-sm font-medium py-2.5 rounded-xl transition-colors disabled:opacity-50"
+            >
+              {actionLoading === req.id ? "جارٍ الموافقة..." : "الموافقة على الطلب"}
+            </button>
+          </div>
+        )}
+
+        {req.status !== "معلق" && (
+          <div className={`text-center text-xs font-medium py-2 rounded-xl ${req.status === "موافق" ? "bg-green-50 text-green-600" : "bg-red-50 text-red-500"}`}>
+            {req.status === "موافق" ? "✓ تمت الموافقة على هذا الطلب" : "✕ تم رفض هذا الطلب"}
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  const renderRefund = (req) => {
+    const config = typeConfig.مرتجعات;
+    const salesNames = (req.sales ?? []).map((s) => s.name).filter(Boolean).join("، ");
+    return (
+      <div key={`refund-${req.id}`} className="border border-gray-100 rounded-xl p-4 space-y-3 hover:bg-gray-50/40 transition-colors">
+        <div className="flex items-center justify-end gap-2">
+          <span className="text-xs text-gray-400 font-mono">{req.id}#</span>
+          <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${req.statusColor}`}>{req.status}</span>
+          <span className="text-sm font-semibold text-gray-700">طلب استرداد</span>
+          <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${config.bg}`}>
+            <svg className={`w-4 h-4 ${config.icon}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d={config.d} />
+            </svg>
+          </div>
+        </div>
+
+        <div className="text-right">
+          <p className="text-sm font-bold text-gray-800">
+            رحلة #{req.tripId}
+            {(req.from || req.to) && (
+              <>
+                {" "}
+                {req.from}
+                {req.from && req.to && <span className="text-gray-400 mx-1">→</span>}
+                {req.to}
+              </>
+            )}
+          </p>
+          <div className="flex items-center justify-end gap-2 mt-1 text-xs text-gray-400 flex-wrap">
+            <span>السائق: {req.driverName} ({req.driverNumber})</span>
+            {(req.date || req.time) && (
+              <>
+                <span className="text-gray-300">•</span>
+                <span>{req.date}{req.time && ` • ${req.time}`}</span>
+              </>
+            )}
+          </div>
+        </div>
+
+        <div className="bg-gray-50 rounded-xl p-3 space-y-1.5 text-xs text-right">
+          <div className="flex justify-between gap-2"><span className="text-gray-800">{fmtMoney(req.proposedAmount)} ر.س</span><span className="text-gray-500">المبلغ المقترح</span></div>
+          <div className="flex justify-between gap-2"><span className="text-gray-800">{fmtMoney(req.amountPaid)} ر.س</span><span className="text-gray-500">المبلغ المدفوع</span></div>
+          <div className="flex justify-between gap-2"><span className="text-gray-800">{fmtMoney(req.totalPrice)} ر.س</span><span className="text-gray-500">إجمالي الرحلة</span></div>
+          {salesNames && <div className="flex justify-between gap-2"><span className="text-gray-800">{salesNames}</span><span className="text-gray-500">المبيعات</span></div>}
+          <div className="pt-2 border-t border-gray-200">
+            <p className="text-gray-500 mb-1">سبب الاسترداد</p>
+            <p className="text-gray-700 leading-relaxed">{req.reason || "—"}</p>
+          </div>
+        </div>
+
+        {req.status === "معلق" && (
+          <button
+            type="button"
+            onClick={() => setRefundModal(req.raw)}
+            className="w-full flex items-center justify-center gap-2 bg-[#c9a84c] hover:bg-[#b8973d] text-white text-sm font-medium py-2.5 rounded-xl transition-colors"
+          >
+            معالجة طلب الاسترداد
+          </button>
+        )}
+
+        {req.status !== "معلق" && (
+          <div className={`text-center text-xs font-medium py-2 rounded-xl ${req.status === "موافق" ? "bg-green-50 text-green-600" : "bg-red-50 text-red-500"}`}>
+            {req.status === "موافق" ? "✓ تم قبول طلب الاسترداد" : "✕ تم رفض طلب الاسترداد"}
+          </div>
+        )}
+      </div>
+    );
+  };
 
   return (
     <div className="w-full space-y-5 pb-8" dir="rtl">
@@ -219,13 +444,25 @@ export default function ApprovalsPage() {
       <div className="bg-white rounded-2xl shadow-sm px-5 py-4">
         <h1 className="text-2xl font-semibold text-[#c9a84c] text-right">مركز الموافقات</h1>
         <p className="text-xs text-gray-400 mt-0.5 text-right">
-          مراجعة وموافقة على طلبات تعديل الرحلات قبل تطبيقها
+          مراجعة وموافقة على طلبات تعديل الرحلات وطلبات الاسترداد
         </p>
       </div>
 
       <div className="bg-white rounded-2xl shadow-sm p-5 space-y-4">
 
-        <div className="grid grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          <div className="flex flex-col gap-1">
+            <label className="text-xs text-gray-500 text-right">نوع الطلب</label>
+            <select
+              value={typeFilter}
+              onChange={(e) => setTypeFilter(e.target.value)}
+              className="border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-400 text-gray-600 text-right"
+            >
+              {typeOptions.map((s) => (
+                <option key={s}>{s}</option>
+              ))}
+            </select>
+          </div>
           <div className="flex flex-col gap-1">
             <label className="text-xs text-gray-500 text-right">فلتر حسب الحالة</label>
             <select
@@ -262,124 +499,15 @@ export default function ApprovalsPage() {
         ) : error ? (
           <div className="text-center py-10 space-y-3 bg-[#faf7f0] rounded-xl border border-gray-100">
             <p className="text-sm text-red-500">{error}</p>
-            <button
-              onClick={fetchRequests}
-              className="px-4 py-2 bg-[#c9a84c] hover:bg-[#b8973d] text-white text-xs font-medium rounded-xl transition-colors"
-            >
+            <button onClick={fetchAll} className="px-4 py-2 bg-[#c9a84c] hover:bg-[#b8973d] text-white text-xs font-medium rounded-xl transition-colors">
               إعادة المحاولة
             </button>
           </div>
         ) : (
           <div className="space-y-4 pt-1">
-            {filtered.map((req) => (
-              <div
-                key={req.id}
-                className="border border-gray-100 rounded-xl p-4 space-y-3 hover:bg-gray-50/40 transition-colors"
-              >
-                <div className="flex items-center justify-end gap-2">
-                  <span className="text-xs text-gray-400 font-mono">{req.id}#</span>
-                  <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${req.statusColor}`}>
-                    {req.status}
-                  </span>
-                  <span className="text-sm font-semibold text-gray-700">{req.type}</span>
-                  <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${config.bg}`}>
-                    <svg className={`w-4 h-4 ${config.icon}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d={config.d} />
-                    </svg>
-                  </div>
-                </div>
-
-                <div className="text-right">
-                  {req.tripId && (
-                    <p className="text-sm font-bold text-gray-800">
-                      #{req.tripId}
-                      {(req.from || req.to) && (
-                        <>
-                          {" "}
-                          {req.from}
-                          {req.from && req.to && <span className="text-gray-400 mx-1">→</span>}
-                          {req.to}
-                        </>
-                      )}
-                    </p>
-                  )}
-
-                  <div className="flex items-center justify-end gap-2 mt-1 text-xs text-gray-400 flex-wrap">
-                    <svg className="w-3.5 h-3.5 text-gray-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        strokeWidth={2}
-                        d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"
-                      />
-                    </svg>
-                    <span>
-                      مقدم من: {req.submittedFrom} ({req.submittedBy})
-                    </span>
-                    {(req.date || req.time) && (
-                      <>
-                        <span className="text-gray-300">•</span>
-                        <span>
-                          {req.date}
-                          {req.time && ` • ${req.time}`}
-                        </span>
-                      </>
-                    )}
-                  </div>
-                </div>
-
-                <div className="bg-gray-50 rounded-xl p-3 space-y-1.5">
-                  <p className="text-xs font-semibold text-gray-500 text-right mb-2">التغييرات المطلوبة</p>
-                  {req.changes.length > 0 ? (
-                    req.changes.map((ch, ci) => (
-                      <div key={ci} className="flex items-center justify-end gap-2 text-xs">
-                        <span className="text-green-600 font-medium">{ch.to}</span>
-                        <span className="text-gray-300">←</span>
-                        <span className="text-red-400 line-through">{ch.from}</span>
-                        <span className="text-gray-500 font-medium">{ch.label}:</span>
-                      </div>
-                    ))
-                  ) : (
-                    <p className="text-xs text-gray-400 text-right">لا توجد تفاصيل تغيير متاحة</p>
-                  )}
-                </div>
-
-                {req.status === "معلق" && (
-                  <div className="grid grid-cols-2 gap-3 pt-1">
-                    <button
-                      disabled={actionLoading === req.id}
-                      onClick={() => handleReject(req.id)}
-                      className="flex items-center justify-center gap-2 bg-red-500 hover:bg-red-600 text-white text-sm font-medium py-2.5 rounded-xl transition-colors disabled:opacity-50"
-                    >
-                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                      </svg>
-                      {actionLoading === req.id ? "جارٍ الرفض..." : "رفض الطلب"}
-                    </button>
-                    <button
-                      disabled={actionLoading === req.id}
-                      onClick={() => handleApprove(req.id)}
-                      className="flex items-center justify-center gap-2 bg-green-500 hover:bg-green-600 text-white text-sm font-medium py-2.5 rounded-xl transition-colors disabled:opacity-50"
-                    >
-                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                      </svg>
-                      {actionLoading === req.id ? "جارٍ الموافقة..." : "الموافقة على الطلب"}
-                    </button>
-                  </div>
-                )}
-
-                {req.status !== "معلق" && (
-                  <div
-                    className={`text-center text-xs font-medium py-2 rounded-xl ${
-                      req.status === "موافق" ? "bg-green-50 text-green-600" : "bg-red-50 text-red-500"
-                    }`}
-                  >
-                    {req.status === "موافق" ? "✓ تمت الموافقة على هذا الطلب" : "✕ تم رفض هذا الطلب"}
-                  </div>
-                )}
-              </div>
-            ))}
+            {filtered.map((req) =>
+              req.type === "مرتجعات" ? renderRefund(req) : renderEditRequest(req)
+            )}
 
             {filtered.length === 0 && (
               <p className="text-center text-gray-400 text-sm py-8">لا توجد طلبات</p>
@@ -387,6 +515,13 @@ export default function ApprovalsPage() {
           </div>
         )}
       </div>
+
+      <RefundHandleModal
+        isOpen={!!refundModal}
+        onClose={() => setRefundModal(null)}
+        refund={refundModal}
+        onSuccess={fetchAll}
+      />
     </div>
   );
 }

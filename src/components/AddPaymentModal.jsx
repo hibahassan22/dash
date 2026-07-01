@@ -4,7 +4,8 @@ import { toast } from "../lib/toast";
 import AppModal, { ModalField, modalInputClass } from "./ui/AppModal";
 import { addTripPayment } from "../services/tripService.js";
 
-const createEmptyForm = () => ({
+const createEmptyForm = (totalPrice = "") => ({
+  total_price: totalPrice,
   amount_paid: "",
   transfer_method: "تحويل بنكي",
   account_number: "",
@@ -17,17 +18,17 @@ const createEmptyForm = () => ({
 /**
  * AddPaymentModal — إضافة دفعة لرحلة من سجل الرحلات
  */
-export default function AddPaymentModal({ isOpen, onClose, tripId, onSuccess }) {
+export default function AddPaymentModal({ isOpen, onClose, tripId, tripTotalPrice, onSuccess }) {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [formData, setFormData] = useState(createEmptyForm);
   const wasOpenRef = useRef(false);
 
   useEffect(() => {
     if (isOpen && !wasOpenRef.current) {
-      setFormData(createEmptyForm());
+      setFormData(createEmptyForm(tripTotalPrice != null && tripTotalPrice !== "" ? String(tripTotalPrice) : ""));
     }
     wasOpenRef.current = isOpen;
-  }, [isOpen, tripId]);
+  }, [isOpen, tripId, tripTotalPrice]);
 
   const set = (key, val) => setFormData((p) => ({ ...p, [key]: val }));
 
@@ -76,6 +77,17 @@ export default function AddPaymentModal({ isOpen, onClose, tripId, onSuccess }) 
       size="md"
     >
       <form onSubmit={handleSubmit} className="space-y-4">
+        <ModalField label="السعر الكلي للرحلة">
+          <input
+            type="number"
+            placeholder="السعر الكلي"
+            value={formData.total_price}
+            onChange={(e) => set("total_price", e.target.value)}
+            className={modalInputClass}
+            disabled={isSubmitting}
+          />
+        </ModalField>
+
         <ModalField label="المبلغ المدفوع" required>
           <input
             type="number"

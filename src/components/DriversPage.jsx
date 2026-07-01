@@ -11,6 +11,15 @@ import { updateDriverStatus, sendDriverNotification, statusButtonClass, isSameDr
 import { useGlobalSearch } from "../hooks/useGlobalSearch";
 import { filterByGlobalSearch } from "../lib/searchUtils";
 import { bannerImage } from "../lib/images.js";
+import {
+  sanitizePhoneInput,
+  validatePhoneTenDigits,
+  normalizeSaudiPhoneFromApi,
+  validateEmail,
+  sanitizeIbanInput,
+  validateSaudiIban,
+  SAUDI_IBAN_DIGITS,
+} from "../lib/phoneValidation.js";
 
 const BASE = "https://drivo1.elmoroj.com/api";
 const DRIVER_ID_ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
@@ -258,17 +267,102 @@ const genderToApiValue = (gender) => {
   return "";
 };
 
+const ibanDigitsFromApi = (iban) => {
+  const raw = String(iban ?? "").trim().toUpperCase();
+  if (raw.startsWith("SA")) return sanitizeIbanInput(raw.slice(2));
+  return sanitizeIbanInput(raw);
+};
+
+const DRIVER_REQUIRED_FIELDS = [
+  ["name", "اسم السائق"],
+  ["address", "المدينة"],
+  ["nationality", "الجنسية"],
+  ["bank_name", "اسم البنك"],
+  ["account_owner", "اسم صاحب الحساب"],
+  ["car_type", "نوع السيارة"],
+  ["car_model", "موديل السيارة"],
+];
+
+const DRIVER_REQUIRED_FILES = [
+  ["identity_image", "صورة الهوية"],
+  ["car_image", "صورة السيارة"],
+  ["license_image", "صورة الرخصة"],
+];
+
 // Field helper — خارج المودال عشان ميتعملش re-mount كل render
-const FormField = ({ label, value, onChange, type = "text", placeholder = "" }) => (
+const FormField = ({ label, value, onChange, type = "text", placeholder = "", required, dir, invalid, hint, maxLength, inputMode }) => (
   <div className="space-y-1.5">
-    <label className="text-xs text-gray-500 block text-right">{label}</label>
+    <label className="text-xs text-gray-500 block text-right">
+      {label}{required ? " *" : ""}
+    </label>
     <input
       type={type}
       value={value}
       onChange={onChange}
       placeholder={placeholder || label}
-      className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:border-[#c9a84c] bg-white text-right placeholder-gray-300"
+      required={required}
+      dir={dir}
+      maxLength={maxLength}
+      inputMode={inputMode}
+      className={`w-full border rounded-xl px-3 py-2.5 text-sm focus:outline-none bg-white text-right placeholder-gray-300 ${
+        invalid ? "border-red-300 focus:border-red-400" : "border-gray-200 focus:border-[#c9a84c]"
+      }`}
     />
+    {hint && (
+      <p className={`text-[11px] text-right ${invalid ? "text-red-600" : "text-gray-400"}`}>{hint}</p>
+    )}
+  </div>
+);
+
+const SaudiPhoneField = ({ value, onChange, invalid, hint }) => (
+  <div className="space-y-1.5">
+    <label className="text-xs text-gray-500 block text-right">رقم الهاتف *</label>
+    <div className="flex gap-2" dir="ltr">
+      <span className="shrink-0 flex items-center px-3 py-2.5 rounded-xl border border-gray-200 bg-gray-50 text-sm text-gray-600 font-medium">
+        +966
+      </span>
+      <input
+        type="tel"
+        inputMode="numeric"
+        value={value}
+        onChange={(e) => onChange(sanitizePhoneInput(e.target.value))}
+        placeholder="05xxxxxxxx"
+        maxLength={10}
+        required
+        className={`flex-1 rounded-xl border px-3 py-2.5 text-sm focus:outline-none bg-white text-left placeholder-gray-300 ${
+          invalid ? "border-red-300 focus:border-red-400" : "border-gray-200 focus:border-[#c9a84c]"
+        }`}
+      />
+    </div>
+    {hint && (
+      <p className={`text-[11px] text-right ${invalid ? "text-red-600" : "text-gray-400"}`}>{hint}</p>
+    )}
+  </div>
+);
+
+const SaudiIbanField = ({ value, onChange, invalid, hint }) => (
+  <div className="space-y-1.5">
+    <label className="text-xs text-gray-500 block text-right">الآيبان *</label>
+    <div className="flex gap-2" dir="ltr">
+      <span className="shrink-0 flex items-center px-3 py-2.5 rounded-xl border border-gray-200 bg-gray-50 text-sm text-gray-600 font-medium">
+        SA
+      </span>
+      <input
+        type="text"
+        inputMode="numeric"
+        value={value}
+        onChange={(e) => onChange(sanitizeIbanInput(e.target.value))}
+        placeholder={"0".repeat(SAUDI_IBAN_DIGITS)}
+        maxLength={SAUDI_IBAN_DIGITS}
+        required
+        className={`flex-1 rounded-xl border px-3 py-2.5 text-sm focus:outline-none bg-white text-left placeholder-gray-300 tracking-wider ${
+          invalid ? "border-red-300 focus:border-red-400" : "border-gray-200 focus:border-[#c9a84c]"
+        }`}
+      />
+    </div>
+    {hint && (
+      <p className={`text-[11px] text-right ${invalid ? "text-red-600" : "text-gray-400"}`}>{hint}</p>
+    )}
   </div>
 );
 
@@ -320,10 +414,10 @@ const DriverFormModal = ({ isOpen, onClose, driverData, onSaved, onToast }) => {
     setFileMap({});
     if (driverData) {
       setForm({
-        name: driverData.name||"", phone: driverData.phone||"",
+        name: driverData.name||"", phone: normalizeSaudiPhoneFromApi(driverData.phone||""),
         address: driverData.address||"", nationality: driverData.nationality||"",
         gender: normalizeGender(driverData.gender), email: driverData.email||"",
-        bank_name:"", account_owner:"", iban:"",
+        bank_name:"", account_owner:"", iban: ibanDigitsFromApi(driverData.iban),
         car_type: driverData.car_type||"", car_model: driverData.car_model||"",
         vehicle_size: driverData.vehicle_size||""
       });
@@ -333,19 +427,78 @@ const DriverFormModal = ({ isOpen, onClose, driverData, onSaved, onToast }) => {
   }, [isOpen, driverData?.id]);
 
   const u = (k) => (e) => setForm(f => ({...f, [k]: e.target.value}));
+  const setPhone = (phone) => setForm((f) => ({ ...f, phone }));
+  const setIban = (iban) => setForm((f) => ({ ...f, iban }));
   const onFileChange = (k, file) => setFileMap(f => ({...f, [k]: file}));
   const isGenderSelected = GENDER_OPTIONS.includes(form.gender);
 
-  const handleSubmit = async (e) => {
-    e.preventDefault();
+  const phoneValidation = useMemo(() => validatePhoneTenDigits(form.phone), [form.phone]);
+  const emailValidation = useMemo(() => validateEmail(form.email), [form.email]);
+  const ibanValidation = useMemo(() => validateSaudiIban(form.iban), [form.iban]);
+
+  const phoneInvalid = form.phone.length > 0 && !phoneValidation.valid;
+  const emailInvalid = form.email.trim().length > 0 && !emailValidation.valid;
+  const ibanInvalid = form.iban.length > 0 && !ibanValidation.valid;
+
+  const isCreateFormValid = useMemo(() => {
+    if (!isGenderSelected || !phoneValidation.valid || !emailValidation.valid) return false;
+    if (isEditing) return true;
+    const textsOk = DRIVER_REQUIRED_FIELDS.every(([key]) => String(form[key] ?? "").trim());
+    const filesOk = DRIVER_REQUIRED_FILES.every(([key]) => Boolean(fileMap[key]));
+    return textsOk && filesOk && Boolean(form.vehicle_size) && ibanValidation.valid;
+  }, [isEditing, form, fileMap, isGenderSelected, phoneValidation.valid, emailValidation.valid, ibanValidation.valid]);
+
+  const validateBeforeSubmit = () => {
     if (!isGenderSelected) {
       onToast?.("error", "يرجى اختيار الجنس");
-      return;
+      return false;
     }
+    if (!phoneValidation.valid) {
+      onToast?.("error", phoneValidation.message || "رقم الهاتف غير صحيح");
+      return false;
+    }
+    if (!emailValidation.valid) {
+      onToast?.("error", emailValidation.message || "البريد الإلكتروني غير صحيح");
+      return false;
+    }
+    if (!isEditing && !ibanValidation.valid) {
+      onToast?.("error", ibanValidation.message || "رقم الآيبان غير صحيح");
+      return false;
+    }
+    if (!isEditing) {
+      for (const [key, label] of DRIVER_REQUIRED_FIELDS) {
+        if (!String(form[key] ?? "").trim()) {
+          onToast?.("error", `${label} مطلوب`);
+          return false;
+        }
+      }
+      if (!form.vehicle_size) {
+        onToast?.("error", "حجم السيارة مطلوب");
+        return false;
+      }
+      for (const [key, label] of DRIVER_REQUIRED_FILES) {
+        if (!fileMap[key]) {
+          onToast?.("error", `${label} مطلوبة`);
+          return false;
+        }
+      }
+    }
+    return true;
+  };
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    if (!validateBeforeSubmit()) return;
     setSaving(true);
     try {
       let url;
-      const apiForm = { ...form, gender: genderToApiValue(form.gender) };
+      const apiForm = {
+        ...form,
+        phone: phoneValidation.normalized ?? form.phone,
+        email: emailValidation.normalized ?? form.email,
+        iban: ibanValidation.normalized ?? form.iban,
+        gender: genderToApiValue(form.gender),
+      };
 
       if (isEditing) {
         // تعديل سائق — FormData عشان الصور
@@ -408,7 +561,13 @@ const DriverFormModal = ({ isOpen, onClose, driverData, onSaved, onToast }) => {
           setTimeout(() => { setSuccess(false); onClose(); }, 800);
         } else {
           const err = await res.json().catch(() => ({}));
-          onToast?.("error", err?.message ?? "حدث خطأ أثناء الإضافة");
+          const msg =
+            (typeof err?.errors === "object"
+              ? Object.values(err.errors).flat().join(" — ")
+              : null) ||
+            err?.message ||
+            "حدث خطأ أثناء الإضافة";
+          onToast?.("error", msg);
         }
       }
     } catch (err) { console.error(err); onToast?.("error", err.message || "حدث خطأ، حاول مجدداً"); }
@@ -429,35 +588,65 @@ const DriverFormModal = ({ isOpen, onClose, driverData, onSaved, onToast }) => {
           <div className="bg-white rounded-xl border border-gray-100 p-4 space-y-3 shadow-sm">
             <h4 className="text-sm font-bold text-[#c9a84c] text-right">$ المعلومات الشخصية</h4>
             <div className="grid grid-cols-2 gap-3">
-              <FormField label="رقم الهاتف" value={form.phone} onChange={u("phone")} placeholder="ادخل الرقم"/>
-              <FormField label="اسم السائق" value={form.name} onChange={u("name")} placeholder="ادخل اسم السائق"/>
-              <FormField label="الجنسية" value={form.nationality} onChange={u("nationality")} placeholder="ادخل جنسية السائق"/>
-              <FormField label="المدينه" value={form.address} onChange={u("address")} placeholder="ادخل مدينة السائق"/>
+              <SaudiPhoneField
+                value={form.phone}
+                onChange={setPhone}
+                invalid={phoneInvalid}
+                hint={
+                  phoneInvalid
+                    ? phoneValidation.message
+                    : form.phone
+                      ? "10 أرقام — مثال: 05xxxxxxxx"
+                      : "كود السعودية +966"
+                }
+              />
+              <FormField label="اسم السائق" value={form.name} onChange={u("name")} placeholder="ادخل اسم السائق" required />
+              <FormField label="الجنسية" value={form.nationality} onChange={u("nationality")} placeholder="ادخل جنسية السائق" required />
+              <FormField label="المدينه" value={form.address} onChange={u("address")} placeholder="ادخل مدينة السائق" required />
               <GenderSelect value={form.gender} onChange={u("gender")}/>
-              <FormField label="البريد الإلكتروني" value={form.email} onChange={u("email")} type="email" placeholder="ادخل بريد السائق"/>
+              <FormField
+                label="البريد الإلكتروني"
+                value={form.email}
+                onChange={u("email")}
+                type="email"
+                placeholder="example@email.com"
+                required
+                dir="ltr"
+                invalid={emailInvalid}
+                hint={emailInvalid ? emailValidation.message : "مثال: name@domain.com"}
+              />
             </div>
-            <FileUpload label="صورة الهوية" name="identity_image" files={fileMap} onFileChange={onFileChange}/>
+            <FileUpload label="صورة الهوية *" name="identity_image" files={fileMap} onFileChange={onFileChange}/>
           </div>
 
           {/* المعلومات المالية */}
           <div className="bg-white rounded-xl border border-gray-100 p-4 space-y-3 shadow-sm">
             <h4 className="text-sm font-bold text-[#c9a84c] text-right">$ المعلومات المالية</h4>
-            <FormField label="اسم البنك" value={form.bank_name} onChange={u("bank_name")} placeholder="ادخل اسم البنك"/>
-            <FormField label="اسم صاحب الحساب" value={form.account_owner} onChange={u("account_owner")} placeholder="ادخل اسم صاحب الحساب"/>
+            <FormField label="اسم البنك" value={form.bank_name} onChange={u("bank_name")} placeholder="ادخل اسم البنك" required={!isEditing} />
+            <FormField label="اسم صاحب الحساب" value={form.account_owner} onChange={u("account_owner")} placeholder="ادخل اسم صاحب الحساب" required={!isEditing} />
             <p className="text-[10px] text-gray-400 text-right">لابد ان يتطابق مع اسم السائق</p>
-            <FormField label="الآيبان" value={form.iban} onChange={u("iban")} placeholder="ادخل رقم الآيبان"/>
+            <SaudiIbanField
+              value={form.iban}
+              onChange={setIban}
+              invalid={ibanInvalid}
+              hint={
+                ibanInvalid
+                  ? ibanValidation.message
+                  : `أرقام فقط — ${SAUDI_IBAN_DIGITS} رقماً بعد SA`
+              }
+            />
           </div>
 
           {/* معلومات السيارة */}
           <div className="bg-white rounded-xl border border-gray-100 p-4 space-y-3 shadow-sm">
             <h4 className="text-sm font-bold text-[#c9a84c] text-right">$ معلومات السيارة</h4>
             <div className="grid grid-cols-2 gap-3">
-              <FormField label="موديل السيارة" value={form.car_model} onChange={u("car_model")} placeholder="ادخل موديل السيارة"/>
-              <FormField label="نوع السيارة" value={form.car_type} onChange={u("car_type")} placeholder="ادخل نوع السيارة"/>
+              <FormField label="موديل السيارة" value={form.car_model} onChange={u("car_model")} placeholder="ادخل موديل السيارة" required={!isEditing} />
+              <FormField label="نوع السيارة" value={form.car_type} onChange={u("car_type")} placeholder="ادخل نوع السيارة" required={!isEditing} />
             </div>
             <div className="space-y-1.5">
-              <label className="text-xs text-gray-500 block text-right">حجم السيارة</label>
-              <select value={form.vehicle_size} onChange={u("vehicle_size")}
+              <label className="text-xs text-gray-500 block text-right">حجم السيارة *</label>
+              <select value={form.vehicle_size} onChange={u("vehicle_size")} required={!isEditing}
                 className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:border-[#c9a84c] bg-white text-right appearance-none">
                 <option value="">اختر حجم السيارة</option>
                 <option value="صغيرة">صغيرة (4 ركاب)</option>
@@ -465,11 +654,11 @@ const DriverFormModal = ({ isOpen, onClose, driverData, onSaved, onToast }) => {
                 <option value="كبيرة">كبيرة (7+ ركاب)</option>
               </select>
             </div>
-            <FileUpload label="صورة السيارة" name="car_image" files={fileMap} onFileChange={onFileChange}/>
-            <FileUpload label="صورة الرخصة" name="license_image" files={fileMap} onFileChange={onFileChange}/>
+            <FileUpload label={`صورة السيارة${isEditing ? "" : " *"}`} name="car_image" files={fileMap} onFileChange={onFileChange}/>
+            <FileUpload label={`صورة الرخصة${isEditing ? "" : " *"}`} name="license_image" files={fileMap} onFileChange={onFileChange}/>
           </div>
 
-          <button type="submit" disabled={saving || success || !isGenderSelected}
+          <button type="submit" disabled={saving || success || !isCreateFormValid}
             className={`w-full font-bold py-3 rounded-xl text-sm transition-colors ${success ? "bg-green-600 text-white" : "bg-[#4a4644] text-white hover:bg-black disabled:opacity-60"}`}>
             {success ? "✓ تم الحفظ بنجاح" : saving ? "جارٍ الحفظ..." : isEditing ? "حفظ التعديلات" : "إضافة سائق"}
           </button>

@@ -8,7 +8,7 @@ import {
 } from "../services/tripService.js";
 import { fetchSalesList } from "../services/salesService.js";
 
-export default function EditOfferedTripModal({ isOpen, onClose, trip, onSuccess }) {
+export default function EditOfferedTripModal({ isOpen, onClose, trip, onSuccess, title }) {
   const toast = useToast();
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [form, setForm] = useState(buildOfferedTripEditForm(null));
@@ -54,9 +54,9 @@ export default function EditOfferedTripModal({ isOpen, onClose, trip, onSuccess 
 
     setIsSubmitting(true);
     try {
-      const updated = await updateOfferedTrip(trip.id, form, originalRef.current);
-      toast.success("تم تعديل الرحلة المعروضة بنجاح");
-      onSuccess?.(updated);
+      const result = await updateOfferedTrip(trip.id, form, originalRef.current);
+      toast.success(result?.message || "تم تعديل الرحلة بنجاح");
+      onSuccess?.(result);
       onClose();
     } catch (err) {
       toast.error(err.message || "حدث خطأ أثناء التعديل");
@@ -71,7 +71,7 @@ export default function EditOfferedTripModal({ isOpen, onClose, trip, onSuccess 
     <AppModal
       isOpen={isOpen}
       onClose={onClose}
-      title={`تعديل الرحلة المعروضة #${trip.id}`}
+      title={title ?? `تعديل الرحلة #${trip.id}`}
       isSubmitting={isSubmitting}
       size="xl"
     >

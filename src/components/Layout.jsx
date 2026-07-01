@@ -4,7 +4,7 @@ import { useAuthContext } from "../context/AuthContext.jsx";
 import { usePermissions } from "../hooks/usePermissions.js";
 import { useUnreadCount } from "../lib/useUnreadCount";
 import { useChatUnreadCount, isChatDriverUnread, markChatDriverRead, syncChatUnreadFromDrivers } from "../lib/useChatUnread";
-import { subscribeNotifications, markAllAsRead, markAsRead, initNotificationsCollection, isNotificationUnread } from "../services/notifications";
+import { subscribeNotifications, markAllAsRead, markAsRead, initNotificationsCollection, isNotificationUnread, syncBackendNotifications } from "../services/notifications";
 import PageTransition from "./PageTransition";
 import AppModal from "./ui/AppModal";
 import { useGlobalSearch, getSearchPlaceholder } from "../hooks/useGlobalSearch";
@@ -42,6 +42,11 @@ function NotificationsDropdown({ onClose }) {
   const [markingAll, setMarkingAll] = useState(false);
   const ref = useRef(null);
   useEffect(() => { const u = subscribeNotifications(setItems); return u; }, []);
+  useEffect(() => {
+    syncBackendNotifications();
+    const poll = setInterval(syncBackendNotifications, 30_000);
+    return () => clearInterval(poll);
+  }, []);
   useEffect(() => {
     const h = (e) => { if (ref.current && !ref.current.contains(e.target)) onClose(); };
     document.addEventListener("mousedown", h);
@@ -93,7 +98,7 @@ function NotificationsDropdown({ onClose }) {
             </div>
             <div className="flex-1 text-right min-w-0">
               <div className="flex items-center justify-between gap-1">
-                <span className="text-[10px] text-gray-400">{fmtDate(n.createdAt)}</span>
+                <span className="text-[10px] text-gray-400">{fmtDate(n.apiCreatedAt ?? n.createdAt)}</span>
                 <p className="text-xs font-semibold text-gray-800 truncate">{n.title}</p>
               </div>
               <p className="text-[11px] text-gray-500 truncate mt-0.5">{n.body}</p>
@@ -101,9 +106,6 @@ function NotificationsDropdown({ onClose }) {
             {!isNotificationUnread(n) ? null : <span className="w-2 h-2 bg-[#c9a84c] rounded-full shrink-0 mt-1.5" />}
           </div>
         ))}
-      </div>
-      <div className="px-4 py-2.5 border-t border-gray-100 bg-gray-50 text-center">
-        <button onClick={onClose} className="text-xs text-[#c9a84c] font-semibold hover:underline">عرض كل الاشعارات</button>
       </div>
     </div>
   );
@@ -287,7 +289,11 @@ export default function Layout({ children }) {
   const { searchQuery, setSearchQuery } = useGlobalSearch();
   const searchPlaceholder = getSearchPlaceholder(location.pathname);
 
-  useEffect(() => { initNotificationsCollection(); }, []);
+  useEffect(() => {
+    initNotificationsCollection();
+    const poll = setInterval(syncBackendNotifications, 60_000);
+    return () => clearInterval(poll);
+  }, []);
 
   const { isAdmin, canRoute } = usePermissions();
   const firstName = user?.firstName ?? user?.fullName?.split(" ")[0] ?? "";

@@ -9,6 +9,8 @@ import {
   fetchAllDriverNotifications,
   deleteDriverNotification,
   resendDriverNotification,
+  resolveEffectiveStatus,
+  syncScheduledStatuses,
   fmtDate,
 } from "../services/driverNotificationsService";
 
@@ -123,7 +125,8 @@ function SendModal({ isOpen, onClose, onSent }) {
 // ── Detail Modal ──────────────────────────────────────────────
 function DetailModal({ notification: n, onClose }) {
   if (!n) return null;
-  const cfg = statusCfg(n.status);
+  const status = resolveEffectiveStatus(n);
+  const cfg = statusCfg(status);
   return (
     <AppModal isOpen={!!n} onClose={onClose} title="تفاصيل الإشعار" size="sm">
       <div className="space-y-4 text-right">
@@ -142,7 +145,7 @@ function DetailModal({ notification: n, onClose }) {
               </div>
               <div>
                 <p className="text-xs text-gray-400 mb-1">الحالة</p>
-                <span className={`text-xs px-2.5 py-0.5 rounded-full border font-medium ${cfg.cls}`}>{n.status}</span>
+                <span className={`text-xs px-2.5 py-0.5 rounded-full border font-medium ${cfg.cls}`}>{status}</span>
               </div>
             </div>
             {n.scheduledAt && (
@@ -229,6 +232,27 @@ export default function NotificationsPage() {
 
   useEffect(() => { load(); }, [load]);
 
+  // تحديث حالة الإشعارات المجدولة فوراً وكل 5 ثوانٍ
+  useEffect(() => {
+    const tick = () => {
+      syncScheduledStatuses();
+      setAll((prev) => {
+        let changed = false;
+        const next = prev.map((n) => {
+          const status = resolveEffectiveStatus(n);
+          if (status === n.status) return n;
+          changed = true;
+          return { ...n, status };
+        });
+        return changed ? next : prev;
+      });
+    };
+
+    tick();
+    const timer = setInterval(tick, 5_000);
+    return () => clearInterval(timer);
+  }, []);
+
   // ── Resend ─────────────────────────────────────────────────
   const handleResend = async (n) => {
     try {
@@ -240,7 +264,8 @@ export default function NotificationsPage() {
 
   // ── Filter & paginate ──────────────────────────────────────
   const filtered = all.filter(n => {
-    if (filterStatus !== "all" && n.status !== filterStatus) return false;
+    const status = resolveEffectiveStatus(n);
+    if (filterStatus !== "all" && status !== filterStatus) return false;
     if (filterType   !== "all" && n.type   !== filterType)   return false;
     if (searchQuery.trim()) {
       const q = searchQuery.trim().toLowerCase();
@@ -257,8 +282,8 @@ export default function NotificationsPage() {
   useEffect(() => { setPage(1); }, [searchQuery, filterStatus, filterType]);
 
   // ── Stats ──────────────────────────────────────────────────
-  const sentCount  = all.filter(n => n.status === "مرسل").length;
-  const schedCount = all.filter(n => n.status === "مجدول").length;
+  const sentCount  = all.filter(n => resolveEffectiveStatus(n) === "مرسل").length;
+  const schedCount = all.filter(n => resolveEffectiveStatus(n) === "مجدول").length;
 
   return (
     <div className="w-full space-y-5" dir="rtl">
@@ -376,7 +401,7 @@ export default function NotificationsPage() {
           <div className="flex flex-col items-center gap-3 py-16 text-center">
             <div className="text-5xl">🔔</div>
             <p className="text-sm text-gray-400 font-medium">
-              {all.length === 0 ? "لا توجد إشعارات مرسلة بعد" : "لا توجد نتائج تطابق البحث"}
+              {all.length === 0 ? "لا توجد إشعارات أنشأتها بعد" : "لا توجد نتائج تطابق البحث"}
             </p>
             {all.length === 0 && (
               <button onClick={() => setSendOpen(true)}
@@ -388,7 +413,8 @@ export default function NotificationsPage() {
         ) : (
           <div className="divide-y divide-gray-50">
             {pageItems.map(n => {
-              const cfg = statusCfg(n.status);
+              const status = resolveEffectiveStatus(n);
+              const cfg = statusCfg(status);
               return (
                 <div key={n.id}
                   className="grid grid-cols-[2fr_3fr_1fr_1fr_1.5fr_1.2fr] items-center px-5 py-3.5 hover:bg-gray-50/60 transition-colors text-right">
@@ -410,7 +436,7 @@ export default function NotificationsPage() {
                   <div className="flex justify-center">
                     <span className={`text-[10px] px-2.5 py-0.5 rounded-full border font-medium flex items-center gap-1 whitespace-nowrap ${cfg.cls}`}>
                       <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${cfg.dot}`} />
-                      {n.status}
+                      {status}
                     </span>
                   </div>
 
