@@ -5,10 +5,11 @@ import { useToast } from "../lib/toast.jsx";
 import { usePermissions } from "../hooks/usePermissions.js";
 import { PERMISSIONS } from "../lib/permissions.js";
 import {
-  subscribeRoles,
+  fetchRoles,
   createRole,
   deleteRole,
   formatRoleDate,
+  isProtectedRole,
 } from "../services/roleService.js";
 import { ConfirmModal } from "./ui/AppModal";
 import RolePermissionsModal from "./permissions/RolePermissionsModal.jsx";
@@ -30,13 +31,20 @@ export default function PermissionsPage() {
   const [roleDesc, setRoleDesc] = useState("");
   const { searchQuery, setSearchQuery } = useGlobalSearch();
 
-  useEffect(() => {
+  const loadRoles = async () => {
     setRolesLoading(true);
-    const unsub = subscribeRoles((list) => {
-      setRoles(list);
+    try {
+      setRoles(await fetchRoles());
+    } catch (err) {
+      toast.error(err.message || "فشل تحميل الأدوار");
+      setRoles([]);
+    } finally {
       setRolesLoading(false);
-    });
-    return unsub;
+    }
+  };
+
+  useEffect(() => {
+    loadRoles();
   }, []);
 
   const filteredRoles = filterByGlobalSearch(roles, searchQuery, (r) => [
@@ -57,6 +65,7 @@ export default function PermissionsPage() {
       toast.success(`تم إضافة «${roleName.trim()}» — اضغط عرض الصلاحيات لتحديدها`);
       setRoleName("");
       setRoleDesc("");
+      await loadRoles();
     } catch (err) {
       toast.error(err.message || "فشل إضافة الدور");
     } finally {
@@ -71,6 +80,7 @@ export default function PermissionsPage() {
       await deleteRole(deleteTarget.id);
       toast.success(`تم حذف الدور «${deleteTarget.name}»`);
       setDeleteTarget(null);
+      await loadRoles();
     } catch (err) {
       toast.error(err.message || "فشل حذف الدور");
     } finally {
@@ -101,7 +111,7 @@ export default function PermissionsPage() {
           </button>
           <div className="text-right">
             <h2 className="text-base font-semibold text-gray-800">إضافة دور جديد</h2>
-            <p className="text-xs text-gray-400">يُحفظ في Firebase ويظهر في صفحة المستخدمين</p>
+            <p className="text-xs text-gray-400">يُحفظ في النظام ويظهر في صفحة المستخدمين</p>
           </div>
         </div>
 
@@ -181,7 +191,7 @@ export default function PermissionsPage() {
                           عرض الصلاحيات
                         </button>
                         )}
-                        {canManageRoles && role.id !== "admin" && (
+                        {canManageRoles && !isProtectedRole(role) && (
                           <button
                             type="button"
                             onClick={() => setDeleteTarget(role)}
@@ -204,6 +214,7 @@ export default function PermissionsPage() {
         isOpen={!!permRole}
         onClose={() => setPermRole(null)}
         role={permRole}
+        onSaved={loadRoles}
       />
 
       <ConfirmModal

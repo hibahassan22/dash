@@ -1,6 +1,16 @@
+import { getIdToken } from "./authService.js";
 import { ROLES } from "../lib/roles.js";
+import { resolveApiRoleId } from "../lib/roleUtils.js";
 
 const API_BASE = "/api";
+
+async function salesHeaders(json = false) {
+  const token = await getIdToken();
+  const h = { Accept: "application/json" };
+  if (token) h["Authorization"] = `Bearer ${token}`;
+  if (json) h["Content-Type"] = "application/json";
+  return h;
+}
 
 /** أدوار Firebase المرتبطة بسجل /api/sales (الدور في Firebase، الـ id = uid) */
 export const SALES_LINKED_ROLES = new Set([ROLES.SUPPORT]);
@@ -74,15 +84,19 @@ export async function fetchSalesList() {
 }
 
 /** تحويل سجل /api/sales لشكل مستخدم في الواجهة */
-export function salesRecordToUser(sale, roleFromFirebase) {
+export function salesRecordToUser(sale, roleFallback) {
   const id = String(sale.id);
+  const role =
+    sale.role_id != null && sale.role_id !== ""
+      ? String(sale.role_id)
+      : roleFallback ?? ROLES.SUPPORT;
   return {
     uid: id,
     id,
     fullName: sale.name ?? "",
     email: sale.email ?? "",
     phone: sale.phone ?? "",
-    role: roleFromFirebase ?? ROLES.SUPPORT,
+    role,
     status: sale.status ?? "active",
     department: "",
     permissions: [],
@@ -156,45 +170,68 @@ export function filterMergedUsers(users, filters) {
   return filterSalesUsers(users, filters);
 }
 
-/** POST /api/sales — id = Firebase uid، بدون role (الدور في Firebase فقط) */
-export async function createSalesRecord({ id, name, phone = "", email }) {
+/** POST /api/sales — نفس شكل Postman: id, name, phone, role_id, email */
+export async function createSalesRecord({ id, name, phone = "", email, password, role_id }) {
+  const salesId = String(id);
+  const parsedRoleId = resolveApiRoleId(role_id);
+  if (!parsedRoleId) {
+    throw new Error("يجب اختيار دور صالح من القائمة");
+  }
+
+  const body = {
+    id: salesId,
+    name: String(name).trim(),
+    phone: String(phone ?? "").trim(),
+    role_id: parsedRoleId,
+    email: String(email).trim().toLowerCase(),
+  };
+
   const res = await fetch(`${API_BASE}/sales`, {
     method: "POST",
     headers: { Accept: "application/json", "Content-Type": "application/json" },
-    body: JSON.stringify({
-      id: String(id),
-      name: String(name).trim(),
-      phone: String(phone ?? "").trim(),
-      email: String(email).trim().toLowerCase(),
-    }),
+    body: JSON.stringify(body),
   });
-  return parseResponse(res);
+  const data = await parseResponse(res);
+
+  if (password) {
+    try {
+      await updateSalesRecord(salesId, { password: String(password) });
+    } catch (err) {
+      console.warn("[sales] password update failed:", err);
+    }
+  }
+
+  return data;
 }
 
 /** DELETE /api/sales/{id} */
 export async function deleteSalesRecord(id) {
-  const { getIdToken } = await import("./authService.js");
-  const token = await getIdToken();
-  const headers = { Accept: "application/json" };
-  if (token) headers["Authorization"] = `Bearer ${token}`;
   const res = await fetch(`${API_BASE}/sales/${encodeURIComponent(id)}`, {
     method: "DELETE",
-    headers,
+    headers: await salesHeaders(),
   });
   if (res.status === 204 || res.status === 200) return true;
   return parseResponse(res);
 }
 
 /** PUT /api/sales/{id} */
-export async function updateSalesRecord(id, { name, phone, email }) {
+export async function updateSalesRecord(id, { name, phone, email, role_id, password }) {
+  const salesId = String(id);
   const body = {};
   if (name !== undefined) body.name = String(name).trim();
   if (phone !== undefined) body.phone = String(phone ?? "").trim();
   if (email !== undefined) body.email = String(email).trim().toLowerCase();
+  if (password) body.password = String(password);
 
-  const res = await fetch(`${API_BASE}/sales/${encodeURIComponent(id)}`, {
+  if (role_id != null && role_id !== "") {
+    const parsedRoleId = resolveApiRoleId(role_id);
+    if (!parsedRoleId) throw new Error("يجب اختيار دور صالح من القائمة");
+    body.role_id = parsedRoleId;
+  }
+
+  const res = await fetch(`${API_BASE}/sales/${encodeURIComponent(salesId)}`, {
     method: "PUT",
-    headers: { Accept: "application/json", "Content-Type": "application/json" },
+    headers: await salesHeaders(true),
     body: JSON.stringify(body),
   });
   return parseResponse(res);

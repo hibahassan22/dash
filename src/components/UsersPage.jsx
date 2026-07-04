@@ -18,10 +18,10 @@ import {
   findSalesByEmail,
   normalizeEmail,
 } from "../services/salesService.js";
-import { fetchStaffRolesMap, saveStaffRole, syncFirebaseUserRoleByEmail } from "../services/staffRoleService.js";
-import { subscribeRoles } from "../services/roleService.js";
-import { buildRoleOptions, getRoleLabel, getDefaultRoleId } from "../lib/roleUtils.js";
-import { validatePhone } from "../lib/phoneValidation.js";
+import { fetchStaffRolesMap } from "../services/staffRoleService.js";
+import { fetchRoles } from "../services/roleService.js";
+import { buildRoleOptions, getRoleLabel, getDefaultRoleId, resolveApiRoleId } from "../lib/roleUtils.js";
+import { validateUserPhone } from "../lib/phoneValidation.js";
 import { STATUS_LABELS, USER_STATUSES } from "../lib/roles.js";
 
 const PAGE_SIZE = 10;
@@ -70,7 +70,8 @@ function UsersPageContent() {
 
   const [salesUsers, setSalesUsers] = useState([]);
   const [roleMap, setRoleMap] = useState({});
-  const [firebaseRoles, setFirebaseRoles] = useState([]);
+  const [apiRoles, setApiRoles] = useState([]);
+  const [rolesLoading, setRolesLoading] = useState(true);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
 
@@ -102,12 +103,15 @@ function UsersPageContent() {
   }, [toast]);
 
   useEffect(() => {
-    const unsub = subscribeRoles(setFirebaseRoles);
+    setRolesLoading(true);
+    fetchRoles()
+      .then(setApiRoles)
+      .catch(() => setApiRoles([]))
+      .finally(() => setRolesLoading(false));
     loadSalesUsers();
-    return unsub;
   }, [loadSalesUsers]);
 
-  const roleOptions = useMemo(() => buildRoleOptions(firebaseRoles), [firebaseRoles]);
+  const roleOptions = useMemo(() => buildRoleOptions(apiRoles, { apiOnly: true }), [apiRoles]);
 
   const users = useMemo(
     () =>
@@ -119,7 +123,7 @@ function UsersPageContent() {
   );
 
   const currentUserName = currentUser?.fullName ?? currentUser?.displayName ?? "مجهول";
-  const currentUserPosition = getRoleLabel(currentUser?.role, firebaseRoles);
+  const currentUserPosition = getRoleLabel(currentUser?.role, apiRoles);
 
   const totalPages = Math.max(1, Math.ceil(users.length / PAGE_SIZE));
   const paged = users.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
@@ -134,9 +138,26 @@ function UsersPageContent() {
       return;
     }
 
-    const phoneCheck = validatePhone(form.phone);
+    const loginEmail = normalizeEmail(currentUser?.email);
+    if (loginEmail && email === loginEmail) {
+      toast.error("لا يمكن استخدام بريد تسجيل دخولك — أدخل بريداً آخر خاص بالموظف");
+      return;
+    }
+
+    const roleId = resolveApiRoleId(form.role, roleOptions);
+    if (!roleId) {
+      toast.error("اختر دوراً صالحاً من القائمة");
+      return;
+    }
+
+    const phoneCheck = validateUserPhone(form.phone);
     if (!phoneCheck.valid) {
       toast.error(phoneCheck.message);
+      return;
+    }
+
+    if (!form.password || form.password.length < 8) {
+      toast.error("كلمة المرور يجب أن تكون 8 أحرف على الأقل");
       return;
     }
 
@@ -148,13 +169,9 @@ function UsersPageContent() {
         name: form.fullName,
         phone: phoneCheck.normalized,
         email: form.email,
+        password: form.password,
+        role_id: roleId,
       });
-      try {
-        await saveStaffRole(id, form.role);
-        await syncFirebaseUserRoleByEmail(form.email, form.role).catch(() => {});
-      } catch (roleErr) {
-        toast.error(roleErr.message || "تم حفظ الموظف لكن فشل حفظ الدور");
-      }
       toast.success("تم إضافة الموظف بنجاح");
       setShowCreate(false);
       await loadSalesUsers();
@@ -168,9 +185,15 @@ function UsersPageContent() {
   const handleEdit = async (form) => {
     if (!editUser) return;
 
-    const phoneCheck = validatePhone(form.phone);
+    const phoneCheck = validateUserPhone(form.phone);
     if (!phoneCheck.valid) {
       toast.error(phoneCheck.message);
+      return;
+    }
+
+    const roleId = resolveApiRoleId(form.role, roleOptions);
+    if (!roleId) {
+      toast.error("اختر دوراً صالحاً من القائمة");
       return;
     }
 
@@ -181,13 +204,8 @@ function UsersPageContent() {
         name: form.fullName,
         phone: phoneCheck.normalized,
         email: editUser.email,
+        role_id: roleId,
       });
-      try {
-        await saveStaffRole(staffId, form.role);
-        await syncFirebaseUserRoleByEmail(editUser.email, form.role).catch(() => {});
-      } catch (roleErr) {
-        toast.error(roleErr.message || "تم تحديث البيانات لكن فشل حفظ الدور");
-      }
       toast.success("تم تحديث بيانات الموظف");
       setEditUser(null);
       await loadSalesUsers();
@@ -250,10 +268,12 @@ function UsersPageContent() {
         {showCreate && (
           <div className="pt-2 border-t border-gray-50">
             <SalesUserForm
+              key={`create-${roleOptions.map((r) => r.id).join("-")}`}
               mode="create"
               existingSales={salesUsers}
               roles={roleOptions}
-              defaultRoleId={getDefaultRoleId(firebaseRoles)}
+              rolesReady={!rolesLoading && roleOptions.length > 0}
+              defaultRoleId={getDefaultRoleId(apiRoles)}
               onSubmit={handleCreate}
               loading={submitting}
             />
@@ -307,7 +327,7 @@ function UsersPageContent() {
           users={paged}
           loading={loading}
           apiOnly
-          firebaseRoles={firebaseRoles}
+          firebaseRoles={apiRoles}
           onEdit={setEditUser}
           onDelete={setDeleteTarget}
           canEdit={canEdit}
@@ -392,6 +412,7 @@ function UsersPageContent() {
             mode="edit"
             initial={editUser}
             roles={roleOptions}
+            rolesReady={!rolesLoading && roleOptions.length > 0}
             onSubmit={handleEdit}
             onCancel={() => setEditUser(null)}
             loading={submitting}

@@ -1,10 +1,44 @@
 /** أقصى طول لرقم جوال سعودي محلي (05xxxxxxxx) */
 export const SAUDI_PHONE_MAX_LEN = 10;
 
+/** حدود رقم الهاتف العام (مستخدمين — أي دولة) */
+export const USER_PHONE_MIN_LEN = 6;
+export const USER_PHONE_MAX_LEN = 15;
+
 /** يبقي أرقاماً فقط ويحدّ الطول */
 export function sanitizePhoneInput(value) {
   const digits = String(value ?? "").replace(/\D/g, "");
   return digits.slice(0, SAUDI_PHONE_MAX_LEN);
+}
+
+/** إدخال هاتف عام — أرقام مع + اختياري في البداية */
+export function sanitizeUserPhoneInput(value) {
+  const raw = String(value ?? "").trim();
+  const hasPlus = raw.startsWith("+");
+  const digits = raw.replace(/\D/g, "").slice(0, USER_PHONE_MAX_LEN);
+  if (!digits) return hasPlus ? "+" : "";
+  return hasPlus ? `+${digits}` : digits;
+}
+
+/** تحقق من رقم هاتف عام (أي دولة) */
+export function validateUserPhone(phone) {
+  const raw = String(phone ?? "").trim();
+  const digits = raw.replace(/\D/g, "");
+
+  if (!digits) {
+    return { valid: false, message: "رقم الهاتف مطلوب" };
+  }
+
+  if (digits.length < USER_PHONE_MIN_LEN) {
+    return { valid: false, message: `رقم الهاتف يجب أن يكون ${USER_PHONE_MIN_LEN} أرقام على الأقل` };
+  }
+
+  if (digits.length > USER_PHONE_MAX_LEN) {
+    return { valid: false, message: `رقم الهاتف يجب ألا يتجاوز ${USER_PHONE_MAX_LEN} رقماً` };
+  }
+
+  const normalized = raw.startsWith("+") ? `+${digits}` : digits;
+  return { valid: true, normalized };
 }
 
 /**

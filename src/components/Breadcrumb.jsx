@@ -15,6 +15,7 @@ const ROUTE_LABELS = {
   "/permissions":   { label: "الصلاحيات",          icon: "🔒" },
   "/users":         { label: "المستخدمين",         icon: "👤" },
   "/system":        { label: "إدارة النظام",       icon: "⚙" },
+  "/accounts":      { label: "الحسابات",           icon: "💳" },
   "/settings":      { label: "الإعدادات",          icon: "🛠" },
   "/new-trip":      { label: "نموذج رحلة جديدة",  icon: "📝" },
 };

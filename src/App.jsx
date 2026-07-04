@@ -23,6 +23,7 @@ import NewTripFormPage from "./components/NewTripFormPage";
 import ApprovalsPage from "./components/ApprovalsPage";
 import PermissionsPage from "./components/PermissionsPage";
 import SystemManagementPage from "./components/SystemManagementPage";
+import AccountsPage from "./components/accounts/AccountsPage";
 import NotFoundPage from "./components/NotFoundPage";
 
 function AdminPage({ children }) {
@@ -63,6 +64,8 @@ export default function App() {
           <Route path="/approvals" element={<AdminPage><ApprovalsPage /></AdminPage>} />
           <Route path="/permissions" element={<AdminPage><PermissionsPage /></AdminPage>} />
           <Route path="/system" element={<AdminPage><SystemManagementPage /></AdminPage>} />
+          <Route path="/accounts" element={<Navigate to="/accounts/employees" replace />} />
+          <Route path="/accounts/:tab" element={<AdminPage><AccountsPage /></AdminPage>} />
           <Route path="/settings" element={<AdminPage><SettingsPage /></AdminPage>} />
           <Route path="/rewards" element={<AdminPage><RewardsPage /></AdminPage>} />
           <Route path="/clients" element={<AdminPage><ClientsPage /></AdminPage>} />

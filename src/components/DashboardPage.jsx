@@ -252,12 +252,49 @@ const STATUS_COLORS = {
   'مرفوضة': '#6b7280'
 };
 
+const ACTIVE_TRIP_STATUSES = new Set([
+  "active",
+  "شغال",
+  "قيد التنفيذ",
+  "in_progress",
+  "progress",
+]);
+
+function tripStatusValue(trip) {
+  return String(trip?.trip_status ?? trip?.status ?? "").trim();
+}
+
+function isActiveTrip(trip) {
+  const status = tripStatusValue(trip);
+  if (!status) return false;
+  const lower = status.toLowerCase();
+  return ACTIVE_TRIP_STATUSES.has(lower) || ACTIVE_TRIP_STATUSES.has(status);
+}
+
+function isActiveDriver(driver) {
+  const raw = driver?.status ?? driver?.status_id ?? driver?.driver_status_id;
+  if (raw == null || raw === "") return false;
+  const n = Number(raw);
+  if (n === 1) return true;
+  const text = String(raw).trim().toLowerCase();
+  return text === "نشط" || text === "active";
+}
+
+function countActiveTrips(tripList = []) {
+  return tripList.filter(isActiveTrip).length;
+}
+
+function countActiveDrivers(driverList = []) {
+  return driverList.filter(isActiveDriver).length;
+}
+
 // =================================================================
 // 2. Main Component
 // =================================================================
 export default function DashboardPage() {
   const [counts, setCounts] = useState(null);
   const [trips, setTrips] = useState([]);
+  const [drivers, setDrivers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [dateFilter, setDateFilter] = useState("thisYear");
@@ -267,21 +304,25 @@ export default function DashboardPage() {
     setLoading(true);
     setError(null);
     try {
-      const [countsRes, logRes, offeredRes] = await Promise.all([
+      const [countsRes, logRes, offeredRes, driversRes] = await Promise.all([
         fetch("https://drivo1.elmoroj.com/api/dashboard-counts"),
         fetch("https://drivo1.elmoroj.com/api/trips"),
         fetch("https://drivo1.elmoroj.com/api/trip-without-drivers"),
+        fetch("https://drivo1.elmoroj.com/api/drivers"),
       ]);
 
       const countsData = await countsRes.json();
       const logData = await logRes.json();
       const offeredData = await offeredRes.json();
+      const driversData = await driversRes.json();
 
       const logTrips = Array.isArray(logData) ? logData : (logData.data ?? logData.value ?? []);
       const offeredTrips = Array.isArray(offeredData) ? offeredData : (offeredData.data ?? []);
+      const driverList = Array.isArray(driversData) ? driversData : (driversData.data ?? driversData.drivers ?? []);
 
       setCounts(countsData.data);
       setTrips(mergeTripSources(logTrips, offeredTrips));
+      setDrivers(driverList);
     } catch (e) {
       setError(e.message || "فشل تحميل بيانات لوحة التحكم.");
     } finally {
@@ -350,17 +391,20 @@ export default function DashboardPage() {
 
   const handlePrint = () => window.print();
 
-  const totalTrips = counts?.total_trips ?? 0;
+  const totalTrips = counts?.total_trips ?? trips.length;
+
+  const activeTripsCount = useMemo(() => countActiveTrips(trips), [trips]);
+  const activeDriversCount = useMemo(() => countActiveDrivers(drivers), [drivers]);
 
   const stats = [
     {
       label: "إجمالي الرحلات",
-      value: counts?.total_trips,
+      value: counts?.total_trips ?? trips.length,
       icon: <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 011.447-.894L9 7m0 13l6-3m-6 3V7m6 10l4.553 2.276A1 1 0 0021 18.382V7.618a1 1 0 00-.553-.894L15 4m0 13V4m0 0L9 7"/></svg>
     },
     {
       label: "الرحلات النشطة",
-      value: counts?.active_trips,
+      value: activeTripsCount,
       icon: <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
     },
     {
@@ -370,7 +414,7 @@ export default function DashboardPage() {
     },
     {
       label: "السائقين النشطين",
-      value: counts?.total_drivers,
+      value: activeDriversCount,
       icon: <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"/></svg>
     },
   ];

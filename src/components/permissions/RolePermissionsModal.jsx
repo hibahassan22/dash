@@ -3,7 +3,7 @@ import AppModal from "../ui/AppModal";
 import { useToast } from "../../lib/toast.jsx";
 import { usePermissions } from "../../hooks/usePermissions.js";
 import { PERMISSIONS } from "../../lib/permissions.js";
-import { updateRolePermissions } from "../../services/roleService.js";
+import { updateRolePermissions, isProtectedRole } from "../../services/roleService.js";
 import PermissionModuleList from "./PermissionModuleList.jsx";
 import {
   PERMISSION_MODULES,
@@ -33,7 +33,7 @@ export default function RolePermissionsModal({ isOpen, onClose, role, onSaved })
   const handleSave = async () => {
     setSaving(true);
     try {
-      const permissions = role.id === "admin" ? ["*"] : permissionsFromModuleState(moduleState);
+      const permissions = isProtectedRole(role) ? ["*"] : permissionsFromModuleState(moduleState);
       await updateRolePermissions(role.id, permissions);
       toast.success(`تم حفظ صلاحيات «${role.name}»`);
       onSaved?.();
@@ -62,7 +62,7 @@ export default function RolePermissionsModal({ isOpen, onClose, role, onSaved })
             <button
               type="button"
               onClick={handleSave}
-              disabled={saving || (role.id !== "admin" && enabledCount === 0)}
+              disabled={saving || (!isProtectedRole(role) && enabledCount === 0)}
               className="px-6 py-2.5 bg-[#c9a84c] hover:bg-[#b8973d] disabled:opacity-60 text-white text-sm font-bold rounded-xl"
             >
               {saving ? "جارٍ الحفظ..." : "حفظ الصلاحيات"}
@@ -80,7 +80,7 @@ export default function RolePermissionsModal({ isOpen, onClose, role, onSaved })
           </p>
         </div>
 
-        {role.id === "admin" ? (
+        {isProtectedRole(role) ? (
           <p className="text-sm text-gray-600 text-right bg-gray-50 border border-gray-100 rounded-xl p-4">
             دور مدير النظام لديه صلاحيات كاملة تلقائياً.
           </p>

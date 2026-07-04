@@ -33,6 +33,7 @@ const ALL_NAV = [
   { label:"الصلاحيات",       route:"/permissions",   icon: <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z"/></svg> },
   { label:"المستخدمين",      route:"/users",         icon: <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"/></svg> },
   { label:"إدارة النظام",    route:"/system",        icon: <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/></svg> },
+  { label:"الحسابات",        route:"/accounts",      icon: <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z" /></svg> },
   { label:"الاعدادات",       route:"/settings",      icon: <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/></svg> },
 ];
 
@@ -303,12 +304,46 @@ export default function Layout({ children }) {
 
   const navItems = ALL_NAV.filter((item) => isAdmin || canRoute(item.route));
 
+  const renderNavButton = (item) => {
+    const active =
+      location.pathname === item.route ||
+      (item.route !== "/" && location.pathname.startsWith(item.route));
+
+    return (
+      <button
+        key={item.route}
+        onClick={() => navigate(item.route)}
+        className={
+          "w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all duration-200 text-right group " +
+          (active
+            ? "text-white shadow-sm scale-[1.01]"
+            : "text-gray-400 hover:text-white hover:scale-[1.01]")
+        }
+        style={active ? { background: "linear-gradient(90deg,#9C6402,#E6C76A)" } : undefined}
+        onMouseEnter={(e) => { if (!active) e.currentTarget.style.background = "linear-gradient(90deg,#9C6402,#E6C76A)"; }}
+        onMouseLeave={(e) => { if (!active) e.currentTarget.style.background = ""; }}
+      >
+        <span className={"shrink-0 transition-transform group-hover:scale-110 " + (active ? "text-white" : "text-gray-500 group-hover:text-white")}>
+          {item.icon}
+        </span>
+        <span className="truncate">{item.label}</span>
+        {active && <span className="mr-auto w-1.5 h-1.5 bg-white rounded-full shrink-0" />}
+      </button>
+    );
+  };
+
   return (
-    <div className="flex h-screen bg-[#f0ede8] font-sans" dir="rtl">
+    <div
+      className="flex h-screen font-sans overflow-hidden"
+      dir="rtl"
+      style={{ background: "linear-gradient(180deg, #1a1a1a 0%, #1c1800 40%, #1a1a1a 100%)" }}
+    >
 
       {/* ── Sidebar ── */}
-      <aside className="flex flex-col py-5 shrink-0 shadow-2xl w-60 h-screen overflow-hidden"
-        style={{background:"linear-gradient(180deg, #1a1a1a 0%, #1c1800 40%, #1a1a1a 100%)"}}>
+      <aside
+        className="flex flex-col py-5 shrink-0 w-60 h-screen overflow-hidden z-10"
+        style={{ background: "linear-gradient(180deg, #1a1a1a 0%, #1c1800 40%, #1a1a1a 100%)" }}
+      >
 
         {/* Logo */}
         <div className="flex items-center gap-3 px-5 mb-6 shrink-0">
@@ -323,27 +358,7 @@ export default function Layout({ children }) {
 
         {/* Nav — scrollable */}
         <nav className="flex-1 overflow-y-auto px-3 space-y-0.5 min-h-0 scrollbar-hide" style={{scrollbarWidth:"none"}}>
-          {navItems.map(item => {
-            const active = location.pathname === item.route || (item.route !== "/" && location.pathname.startsWith(item.route));
-            return (
-              <button key={item.route} onClick={() => navigate(item.route)}
-                className={"w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all duration-200 text-right group " +
-                  (active
-                    ? "text-white shadow-sm scale-[1.01]"
-                    : "text-gray-400 hover:text-white hover:scale-[1.01]"
-                  )}
-                style={active ? {background:"linear-gradient(90deg,#9C6402,#E6C76A)"} : undefined}
-                onMouseEnter={e => { if (!active) e.currentTarget.style.background="linear-gradient(90deg,#9C6402,#E6C76A)"; }}
-                onMouseLeave={e => { if (!active) e.currentTarget.style.background=""; }}
-              >
-                <span className={"shrink-0 transition-transform group-hover:scale-110 " + (active ? "text-white" : "text-gray-500 group-hover:text-white")}>
-                  {item.icon}
-                </span>
-                <span className="truncate">{item.label}</span>
-                {active && <span className="mr-auto w-1.5 h-1.5 bg-white rounded-full shrink-0" />}
-              </button>
-            );
-          })}
+          {navItems.map((item) => renderNavButton(item))}
         </nav>
 
         {/* User card — always pinned to bottom */}
@@ -372,8 +387,8 @@ export default function Layout({ children }) {
         </div>
       </aside>
 
-      {/* ── Main ── */}
-      <main className="flex-1 flex flex-col overflow-hidden">
+      {/* ── Main — panel emerging from sidebar ── */}
+      <main className="relative z-20 flex-1 flex flex-col overflow-hidden min-w-0 rounded-tr-[32px] rounded-br-[32px] bg-white shadow-[0_0_40px_rgba(0,0,0,0.25)]">
 
         {/* Topbar */}
         <header className="bg-white border-b border-gray-200/80 px-6 py-3 flex items-center justify-between shrink-0 shadow-sm">
@@ -434,7 +449,7 @@ export default function Layout({ children }) {
           </div>
         </header>
 
-        <div className="flex-1 min-h-0 overflow-y-auto p-6">
+        <div className="flex-1 min-h-0 overflow-y-auto p-6 bg-[#f0ede8]">
           <PageTransition>
             {children}
           </PageTransition>

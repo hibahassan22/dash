@@ -23,6 +23,7 @@ const ROUTE_PRIORITY = [
   "/users",
   "/permissions",
   "/system",
+  "/accounts",
   "/settings",
 ];
 
